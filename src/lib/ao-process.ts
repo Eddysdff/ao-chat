@@ -1,16 +1,14 @@
 import { createDataItemSigner, connect } from '@permaweb/ao-sdk';
 import { ProcessResult } from '@/types/ao';
+import { config } from '@/config';
 
-// AO Process ID - 需要替换为实际部署的Process ID
-const PROCESS_ID = 'YOUR_PROCESS_ID';
-
-// 创建AO客户端实例
-const client = connect({
-  MU_URL: 'https://mu.ao-testnet.xyz',
-  CU_URL: 'https://cu.ao-testnet.xyz',
-});
+const ENV = process.env.NODE_ENV || 'test';
+const endpoints = config.ao.endpoints[ENV];
+const PROCESS_ID = config.ao.processId[ENV];
 
 export class AOProcess {
+  private static client = connect(endpoints);
+
   // 添加重试机制的私有方法
   private static async sendMessageWithRetry(
     action: string, 
@@ -26,7 +24,7 @@ export class AOProcess {
           throw new Error('ArConnect not found');
         }
 
-        const result = await client.message({
+        const result = await AOProcess.client.message({
           process: targetProcess,
           tags: [{ name: 'Action', value: action }],
           data: data,
