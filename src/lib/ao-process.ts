@@ -1,14 +1,16 @@
 import { createDataItemSigner, connect } from '@permaweb/ao-sdk';
 import { ProcessResult } from '@/types/ao';
-import { config } from '@/config';
 
-const ENV = process.env.NODE_ENV || 'test';
-const endpoints = config.ao.endpoints[ENV];
-const PROCESS_ID = config.ao.processId[ENV];
+// 使用已部署的Process ID
+const PROCESS_ID = 'NZgQPPhsKrR3xpRlB2AUiigj92dJS41OXxkhIZ34P4Q';
+
+// 创建AO客户端实例
+const client = connect({
+  MU_URL: 'https://mu.ao-testnet.xyz',
+  CU_URL: 'https://cu.ao-testnet.xyz',
+});
 
 export class AOProcess {
-  private static client = connect(endpoints);
-
   // 添加重试机制的私有方法
   private static async sendMessageWithRetry(
     action: string, 
@@ -24,11 +26,17 @@ export class AOProcess {
           throw new Error('ArConnect not found');
         }
 
-        const result = await AOProcess.client.message({
+        // 修改消息格式和签名方式
+        const message = {
           process: targetProcess,
           tags: [{ name: 'Action', value: action }],
-          data: data,
-          signer: createDataItemSigner(window.arweaveWallet)
+          data: JSON.stringify(data), // 确保数据被字符串化
+        };
+
+        const signer = createDataItemSigner(window.arweaveWallet);
+        const result = await client.message({
+          ...message,
+          signer,
         });
 
         return result as ProcessResult;
