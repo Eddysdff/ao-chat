@@ -7,10 +7,14 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "deploy": "ts-node scripts/deploy.ts"
+    "deploy": "ts-node scripts/deploy.ts",
+    "test:env": "ts-node scripts/start-test-env.ts",
+    "test:local": "ts-node scripts/test-with-arlocal.ts",
+    "test:all": "npm run test:env && npm run test:local"
   },
   "dependencies": {
     "@permaweb/ao-sdk": "^0.0.23",
+    "arlocal": "^1.1.66",
     "arweave": "^1.14.4",
     "next": "14.0.4",
     "react": "^18",
