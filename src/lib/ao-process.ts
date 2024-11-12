@@ -1,23 +1,31 @@
 import { createDataItemSigner, connect } from '@permaweb/ao-sdk';
 import { ProcessResult } from '@/types/ao';
+import { getConfig } from '@/config';
 
-// 使用已部署的Process ID
-const PROCESS_ID = 'NZgQPPhsKrR3xpRlB2AUiigj92dJS41OXxkhIZ34P4Q';
+const config = getConfig();
+const PROCESS_ID = config.ao.processId;
 
-// 创建AO客户端实例
 const client = connect({
-  MU_URL: 'https://mu.ao-testnet.xyz',
-  CU_URL: 'https://cu.ao-testnet.xyz',
+  MU_URL: config.ao.endpoints.MU_URL,
+  CU_URL: config.ao.endpoints.CU_URL,
 });
 
 export class AOProcess {
-  // 添加重试机制的私有方法
+  private static cache = new Map<string, any>();
+  private static cacheTimeout = 5000; // 5秒缓存
+
   private static async sendMessageWithRetry(
     action: string, 
     data: any = {}, 
     targetProcess: string = PROCESS_ID,
     maxRetries: number = 3
   ): Promise<ProcessResult> {
+    const cacheKey = `${action}-${JSON.stringify(data)}-${targetProcess}`;
+    const cached = this.cache.get(cacheKey);
+    if (cached && Date.now() - cached.timestamp < this.cacheTimeout) {
+      return cached.data;
+    }
+
     let lastError;
     
     for (let i = 0; i < maxRetries; i++) {
@@ -26,11 +34,15 @@ export class AOProcess {
           throw new Error('ArConnect not found');
         }
 
-        // 修改消息格式和签名方式
+        console.log(`Sending message to process ${targetProcess}:`, {
+          action,
+          data
+        });
+
         const message = {
           process: targetProcess,
           tags: [{ name: 'Action', value: action }],
-          data: JSON.stringify(data), // 确保数据被字符串化
+          data: JSON.stringify(data),
         };
 
         const signer = createDataItemSigner(window.arweaveWallet);
@@ -39,11 +51,33 @@ export class AOProcess {
           signer,
         });
 
-        return result as ProcessResult;
+        console.log('Raw result:', result);
+
+        let processedResult: ProcessResult;
+        if (typeof result === 'string') {
+          try {
+            processedResult = JSON.parse(result);
+          } catch {
+            processedResult = {
+              success: true,
+              data: result
+            };
+          }
+        } else {
+          processedResult = result as ProcessResult;
+        }
+
+        console.log('Processed result:', processedResult);
+
+        this.cache.set(cacheKey, {
+          data: processedResult,
+          timestamp: Date.now()
+        });
+
+        return processedResult;
       } catch (error) {
         console.warn(`Attempt ${i + 1} failed:`, error);
         lastError = error;
-        // 指数退避重试
         await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, i)));
       }
     }
@@ -51,7 +85,6 @@ export class AOProcess {
     throw lastError;
   }
 
-  // 修改现有方法使用重试机制
   static async sendInvitation(to: string, nickname: string): Promise<ProcessResult> {
     return this.sendMessageWithRetry('SendInvitation', { to, nickname });
   }
@@ -112,12 +145,26 @@ export class AOProcess {
     return this.sendMessageWithRetry('GetChatrooms', {});
   }
 
-  // 添加健康检查方法
   static async checkHealth(processId: string = PROCESS_ID): Promise<boolean> {
+    const cacheKey = `health-check-${processId}`;
+    const cached = this.cache.get(cacheKey);
+    if (cached && Date.now() - cached.timestamp < this.cacheTimeout) {
+      return cached.data;
+    }
+
     try {
+      console.log('Checking AO Process health for process:', processId);
       const result = await this.sendMessageWithRetry('health-check', {}, processId);
-      return result.success === true;
-    } catch {
+      const isHealthy = Boolean(result?.success);
+      
+      this.cache.set(cacheKey, {
+        data: isHealthy,
+        timestamp: Date.now()
+      });
+
+      return isHealthy;
+    } catch (error) {
+      console.error('Health check failed:', error);
       return false;
     }
   }

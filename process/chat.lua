@@ -50,6 +50,11 @@ Handlers.add(
     local to = msg.Data.to
     local fromNickname = msg.Data.nickname
 
+    -- 添加调试日志
+    print("Sending invitation from:", from)
+    print("To:", to)
+    print("Nickname:", fromNickname)
+
     -- 验证昵称
     if not validateNickname(fromNickname) then
       return { success = false, error = "Invalid nickname length" }
@@ -67,6 +72,16 @@ Handlers.add(
       end
     end
 
+    -- 确保State.invitations已初始化
+    if not State.invitations then
+      State.invitations = {}
+    end
+
+    -- 确保接收者的邀请列表已初始化
+    if not State.invitations[to] then
+      State.invitations[to] = {}
+    end
+
     -- 创建新邀请
     local invitation = {
       from = from,
@@ -76,12 +91,21 @@ Handlers.add(
       timestamp = os.time()
     }
 
-    if not State.invitations[to] then
-      State.invitations[to] = {}
-    end
+    -- 添加邀请到列表
     table.insert(State.invitations[to], invitation)
 
-    return { success = true, invitation = invitation }
+    -- 添加调试日志
+    print("Invitation created:", ao.json.encode(invitation))
+    print("Updated invitations for recipient:", ao.json.encode(State.invitations[to]))
+
+    return {
+      success = true,
+      invitation = invitation,
+      debug = {
+        recipientInvitations = State.invitations[to],
+        allInvitations = State.invitations
+      }
+    }
   end
 )
 
@@ -100,7 +124,7 @@ Handlers.add(
 
     cleanExpiredInvitations(to)
 
-    for _, inv in ipairs(State.invitations[to]) do
+    for _, inv in ipairs(State.invitations[to] or {}) do
       if inv.from == from and inv.status == "pending" then
         inv.status = "accepted"
         
@@ -223,7 +247,23 @@ Handlers.add(
   function(msg)
     local address = msg.From
     cleanExpiredInvitations(address)
-    return { success = true, invitations = State.invitations[address] or {} }
+
+    -- 添加调试日志
+    print("Getting invitations for address:", address)
+    print("Current State.invitations:", ao.json.encode(State.invitations))
+    print("Invitations for this address:", ao.json.encode(State.invitations[address]))
+    
+    -- 确保返回正确的格式
+    return {
+      success = true,
+      invitations = State.invitations[address] or {},
+      debug = {
+        address = address,
+        hasInvitations = State.invitations[address] ~= nil,
+        invitationsCount = State.invitations[address] and #State.invitations[address] or 0,
+        allInvitations = State.invitations -- 用于调试
+      }
+    }
   end
 )
 
@@ -233,7 +273,12 @@ Handlers.add(
   Handlers.utils.hasMatchingTag("Action", "GetContacts"),
   function(msg)
     local address = msg.From
-    return { success = true, contacts = State.contacts[address] or {} }
+    
+    -- 直接返回结果
+    return {
+      success = true,
+      contacts = State.contacts[address] or {}
+    }
   end
 )
 
@@ -428,5 +473,45 @@ Handlers.add(
     
     table.insert(State.messages, message)
     return { success = true, message = message }
+  end
+)
+
+-- 添加健康检查处理器
+Handlers.add(
+  "health-check",
+  Handlers.utils.hasMatchingTag("Action", "health-check"),
+  function(msg)
+    return {
+      success = true,
+      timestamp = os.time()
+    }
+  end
+)
+
+-- 确保State正确初始化
+if not State then
+  State = {
+    invitations = {},
+    contacts = {},
+    nicknames = {}
+  }
+end
+
+-- 添加辅助函数用于检查State
+function debugState()
+  return {
+    invitationsInitialized = State.invitations ~= nil,
+    contactsInitialized = State.contacts ~= nil,
+    invitationsCount = State.invitations and #State.invitations or 0,
+    state = State
+  }
+end
+
+-- 添加调试处理器
+Handlers.add(
+  "debug-state",
+  Handlers.utils.hasMatchingTag("Action", "DebugState"),
+  function(msg)
+    return debugState()
   end
 ) 
