@@ -18,27 +18,29 @@ export default function ChatPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    checkConnection();
-  }, []);
-
-  const checkConnection = async () => {
-    try {
-      const addr = await getActiveAddress();
-      if (!addr) {
-        router.push('/');
-      } else {
+    const checkConnection = async () => {
+      try {
+        const addr = await getActiveAddress();
+        if (!addr) {
+          router.push('/');
+          return;
+        }
+        
         setAddress(addr);
-        // 验证AO Process连接
+        
+        // 只检查一次Process健康状态
         const isHealthy = await AOProcess.checkHealth();
         if (!isHealthy) {
           setError('Unable to connect to AO Process. Please try again later.');
         }
+      } catch (error) {
+        console.error('Connection check failed:', error);
+        router.push('/');
       }
-    } catch (error) {
-      console.error('Connection check failed:', error);
-      router.push('/');
-    }
-  };
+    };
+
+    checkConnection();
+  }, []); // 空依赖数组确保只运行一次
 
   const handleStartChat = async (contact: Contact) => {
     if (!address) return;

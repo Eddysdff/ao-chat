@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { AOProcess } from '@/lib/ao-process';
-import { Contact, ChatRoom, Message } from '@/types/ao';
+import { Contact, ChatRoom, Message, ChatInvitation } from '@/types/ao';
 import { Encryption } from '@/lib/encryption';
 import VideoCallModal from '@/components/video/VideoCallModal';
 import { WebRTCService } from '@/lib/webrtc';
@@ -35,6 +35,7 @@ export default function ChatWindow({
   const [isVideoEnabled, setIsVideoEnabled] = useState(true);
   const webrtcService = useRef<WebRTCService | null>(null);
   const [connectionStrategy, setConnectionStrategy] = useState<string>('');
+  const [chatInvitations, setChatInvitations] = useState<ChatInvitation[]>([]);
 
   // 滚动到最新消息
   const scrollToBottom = () => {
@@ -334,6 +335,74 @@ export default function ChatWindow({
     }
   };
 
+  // 添加聊天邀请处理UI
+  {chatInvitations.length > 0 && (
+    <div className="p-4 border-t border-gray-200">
+      <h3 className="font-semibold mb-2">Chat Invitations</h3>
+      {chatInvitations.map((invitation) => (
+        <div key={invitation.processId} className="mb-2 p-2 bg-gray-50 rounded">
+          <div className="text-sm">From: {invitation.fromNickname}</div>
+          <div className="flex gap-2 mt-2">
+            <button
+              onClick={() => handleAcceptChatInvitation(invitation)}
+              className="text-xs bg-green-500 text-white px-2 py-1 rounded"
+            >
+              Join Chat
+            </button>
+            <button
+              onClick={() => handleRejectChatInvitation(invitation)}
+              className="text-xs bg-red-500 text-white px-2 py-1 rounded"
+            >
+              Decline
+            </button>
+          </div>
+        </div>
+      ))}
+    </div>
+  )}
+
+  // 添加处理函数
+  const handleAcceptChatInvitation = async (invitation: ChatInvitation) => {
+    try {
+      const result = await AOProcess.acceptChatroom(invitation.processId);
+      if (result.success) {
+        await loadChatInvitations();
+      }
+    } catch (error) {
+      console.error('Failed to accept chat invitation:', error);
+    }
+  };
+
+  const handleRejectChatInvitation = async (invitation: ChatInvitation) => {
+    try {
+      const result = await AOProcess.rejectChatroom(invitation.processId);
+      if (result.success) {
+        await loadChatInvitations();
+      }
+    } catch (error) {
+      console.error('Failed to reject chat invitation:', error);
+    }
+  };
+
+  // 添加加载函数
+  const loadChatInvitations = async () => {
+    try {
+      const result = await AOProcess.getChatroomInvitations();
+      if (result.success) {
+        setChatInvitations(result.chatInvitations || []);
+      }
+    } catch (error) {
+      console.error('Failed to load chat invitations:', error);
+    }
+  };
+
+  // 添加聊天邀请加载的 useEffect
+  useEffect(() => {
+    loadChatInvitations();
+    const interval = setInterval(loadChatInvitations, 10000);
+    return () => clearInterval(interval);
+  }, []);
+
   // 未选择联系人时的显示
   if (!selectedContact) {
     return (
@@ -370,19 +439,31 @@ export default function ChatWindow({
         </button>
       </div>
 
-      {/* 添加视频通话模态框 */}
-      <VideoCallModal
-        isOpen={isVideoCallActive}
-        onClose={() => setIsVideoCallActive(false)}
-        contact={selectedContact}
-        isCaller={true}
-        localStream={localStream}
-        remoteStream={remoteStream}
-        onToggleAudio={() => setIsAudioEnabled(!isAudioEnabled)}
-        onToggleVideo={() => setIsVideoEnabled(!isVideoEnabled)}
-        isAudioEnabled={isAudioEnabled}
-        isVideoEnabled={isVideoEnabled}
-      />
+      {/* 聊天邀请部分 - 新添加 */}
+      {chatInvitations.length > 0 && (
+        <div className="p-4 border-b border-gray-200">
+          <h3 className="font-semibold mb-2">Chat Invitations</h3>
+          {chatInvitations.map((invitation) => (
+            <div key={invitation.processId} className="mb-2 p-2 bg-gray-50 rounded">
+              <div className="text-sm">From: {invitation.fromNickname}</div>
+              <div className="flex gap-2 mt-2">
+                <button
+                  onClick={() => handleAcceptChatInvitation(invitation)}
+                  className="text-xs bg-green-500 text-white px-2 py-1 rounded"
+                >
+                  Join Chat
+                </button>
+                <button
+                  onClick={() => handleRejectChatInvitation(invitation)}
+                  className="text-xs bg-red-500 text-white px-2 py-1 rounded"
+                >
+                  Decline
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* 消息列表 */}
       <div 
@@ -438,6 +519,20 @@ export default function ChatWindow({
           </button>
         </div>
       </form>
+
+      {/* 视频通话模态框 */}
+      <VideoCallModal
+        isOpen={isVideoCallActive}
+        onClose={() => setIsVideoCallActive(false)}
+        contact={selectedContact!}
+        isCaller={true}
+        localStream={localStream}
+        remoteStream={remoteStream}
+        onToggleAudio={() => setIsAudioEnabled(!isAudioEnabled)}
+        onToggleVideo={() => setIsVideoEnabled(!isVideoEnabled)}
+        isAudioEnabled={isAudioEnabled}
+        isVideoEnabled={isVideoEnabled}
+      />
 
       {/* 连接状态 */}
       <div className="text-sm text-gray-400 mt-2">

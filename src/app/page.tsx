@@ -13,46 +13,29 @@ export default function Home() {
   const MAX_RETRIES = 3;
 
   useEffect(() => {
-    checkConnection();
-  }, []);
-
-  const checkConnection = async () => {
-    try {
+    const checkExistingConnection = async () => {
       const address = await getActiveAddress();
       if (address) {
-        const isHealthy = await AOProcess.checkHealth();
-        if (!isHealthy) {
-          throw new Error('AO Process connection failed');
-        }
         router.push('/chat');
       }
-    } catch (error) {
-      console.error('Connection check failed:', error);
-    }
-  };
+    };
+    checkExistingConnection();
+  }, [router]);
 
   const handleConnect = async () => {
+    if (isConnecting) return;
+
     try {
       setIsConnecting(true);
       setError(null);
-      await connectWallet();
       
-      const isHealthy = await AOProcess.checkHealth();
-      if (!isHealthy) {
-        throw new Error('Unable to connect to AO Process');
+      const address = await connectWallet();
+      if (address) {
+        router.push('/chat');
       }
-
-      router.push('/chat');
     } catch (error) {
       console.error('Connection failed:', error);
       setError(getErrorMessage(error));
-      
-      if (connectionAttempts < MAX_RETRIES) {
-        setConnectionAttempts(prev => prev + 1);
-        setTimeout(() => {
-          handleConnect();
-        }, 1000 * Math.pow(2, connectionAttempts));
-      }
     } finally {
       setIsConnecting(false);
     }
