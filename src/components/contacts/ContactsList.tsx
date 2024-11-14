@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { AOProcess } from '@/lib/ao-process';
 import { Contact, ContactInvitation } from '@/types/ao';
 import AddContactModal from './AddContactModal';
+import Notification from '../common/Notification';
 
 interface ContactsListProps {
   selectedContact: Contact | null;
@@ -24,16 +25,12 @@ export default function ContactsList({
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const verifyProcessState = async () => {
-    try {
-      const result = await AOProcess.sendMessage('DebugState');
-      console.log('[Contacts] Process state:', result);
-      return result.success;
-    } catch (error) {
-      console.error('[Contacts] Process state check failed:', error);
-      return false;
-    }
-  };
+  const [notification, setNotification] = useState<{
+    type: 'success' | 'error' | 'info';
+    message: string;
+  } | null>(null);
+  const [processingInvitations, setProcessingInvitations] = useState<string[]>([]);
+  const [newInvitationCount, setNewInvitationCount] = useState(0);
 
   const loadData = async () => {
     try {
@@ -45,84 +42,36 @@ export default function ContactsList({
         AOProcess.getPendingInvitations()
       ]);
 
-      console.log('[Contacts] Raw results:', {
-        contacts: contactsResult,
-        invitations: invitationsResult
-      });
-
-      // 处理联系人数据
-      if (contactsResult && contactsResult.success) {
-        const contactsList = contactsResult.contacts || [];
-        if (!Array.isArray(contactsList)) {
-          console.error('[Contacts] Invalid contacts data:', contactsList);
-          setContacts([]);
-        } else {
-          console.log('[Contacts] Setting contacts:', contactsList);
-          setContacts(contactsList);
-        }
-      } else {
-        const error = contactsResult?.error || 'Unknown error';
-        console.error('[Contacts] Failed to get contacts:', error);
-        setContacts([]);
+      if (contactsResult?.success) {
+        const contactsList = Array.isArray(contactsResult.contacts) 
+          ? contactsResult.contacts 
+          : [];
+        setContacts(contactsList);
       }
 
-      // 处理邀请数据
-      if (invitationsResult && invitationsResult.success) {
-        const invitationsList = invitationsResult.invitations || [];
-        if (!Array.isArray(invitationsList)) {
-          console.error('[Contacts] Invalid invitations data:', invitationsList);
-          setInvitations([]);
-        } else {
-          console.log('[Contacts] Setting invitations:', invitationsList);
-          setInvitations(invitationsList);
+      if (invitationsResult?.success) {
+        const invitationsList = Array.isArray(invitationsResult.invitations)
+          ? invitationsResult.invitations
+          : [];
+        setInvitations(invitationsList);
+        
+        if (invitationsList.length > 0) {
+          setNewInvitationCount(invitationsList.length);
+          setNotification({
+            type: 'info',
+            message: `You have ${invitationsList.length} new contact ${
+              invitationsList.length === 1 ? 'invitation' : 'invitations'
+            }`
+          });
         }
-      } else {
-        const error = invitationsResult?.error || 'Unknown error';
-        console.error('[Contacts] Failed to get invitations:', error);
-        setInvitations([]);
       }
 
       setError(null);
     } catch (error) {
       console.error('[Contacts] Load data failed:', error);
-      setContacts([]);
-      setInvitations([]);
+      setError('Failed to load contacts and invitations');
     } finally {
       setIsLoading(false);
-    }
-  };
-
-  const handleAddContact = async (address: string, nickname: string) => {
-    try {
-      // 基本验证
-      if (!address || !nickname) {
-        throw new Error('Address and nickname are required');
-      }
-
-      // 验证地址格式
-      if (!/^[a-zA-Z0-9_-]{43}$/.test(address)) {
-        throw new Error('Invalid Arweave address format');
-      }
-
-      // 验证昵称长度
-      if (nickname.length > 32) {
-        throw new Error('Nickname is too long (max 32 characters)');
-      }
-
-      console.log('[Contacts] Sending invitation to:', address, 'with nickname:', nickname);
-      const result = await AOProcess.sendInvitation(address, nickname);
-      console.log('[Contacts] Send invitation result:', result);
-
-      if (result.success) {
-        await loadData();
-        setIsAddModalOpen(false);
-        setError(null);
-      } else {
-        setError(result.error || 'Failed to send invitation');
-      }
-    } catch (error) {
-      console.error('[Contacts] Failed to add contact:', error);
-      setError(error instanceof Error ? error.message : 'Failed to add contact');
     }
   };
 
@@ -136,7 +85,7 @@ export default function ContactsList({
     };
 
     refreshData();
-    interval = setInterval(refreshData, 30000);
+    interval = setInterval(refreshData, 5000);
 
     return () => {
       mounted = false;
@@ -146,34 +95,60 @@ export default function ContactsList({
 
   const handleAcceptInvitation = async (invitation: ContactInvitation) => {
     try {
+      setProcessingInvitations(prev => [...prev, invitation.from]);
+      
       const result = await AOProcess.acceptInvitation(
         invitation.from,
         `User-${invitation.from.slice(0, 6)}`
       );
+      
       if (result.success) {
+        setNotification({
+          type: 'success',
+          message: 'Contact added successfully'
+        });
         await loadData();
-        setError(null);
       } else {
-        setError(result.error || 'Failed to accept invitation');
+        setNotification({
+          type: 'error',
+          message: result.error || 'Failed to accept invitation'
+        });
       }
     } catch (error) {
-      console.error('Accept invitation error:', error);
-      setError('Failed to accept invitation');
+      setNotification({
+        type: 'error',
+        message: 'Failed to accept invitation'
+      });
+    } finally {
+      setProcessingInvitations(prev => prev.filter(id => id !== invitation.from));
     }
   };
 
   const handleRejectInvitation = async (invitation: ContactInvitation) => {
     try {
+      setProcessingInvitations(prev => [...prev, invitation.from]);
+      
       const result = await AOProcess.rejectInvitation(invitation.from);
+      
       if (result.success) {
+        setNotification({
+          type: 'success',
+          message: 'Invitation rejected'
+        });
         await loadData();
-        setError(null);
       } else {
-        setError(result.error || 'Failed to reject invitation');
+        setNotification({
+          type: 'error',
+          message: result.error || 'Failed to reject invitation'
+        });
       }
     } catch (error) {
-      console.error('Reject invitation error:', error);
-      setError('Failed to reject invitation');
+      setNotification({
+        type: 'error',
+        message: 'Failed to reject invitation'
+      });
+    } finally {
+      setProcessingInvitations(prev => prev.filter(id => id !== invitation.from));
     }
   };
 
@@ -183,7 +158,7 @@ export default function ContactsList({
       <div className="p-4 border-b border-gray-200">
         <button
           onClick={() => setIsAddModalOpen(true)}
-          className="w-full bg-green-500 hover:bg-green-600 text-white font-semibold py-2 px-4 rounded flex items-center justify-center"
+          className="w-full bg-green-500 hover:bg-green-600 text-white font-semibold py-2 px-4 rounded flex items-center justify-center transition-colors duration-200"
         >
           <span className="mr-2">+</span> Add Contact
         </button>
@@ -203,22 +178,42 @@ export default function ContactsList({
           {invitations.map((invitation) => (
             <div
               key={`${invitation.from}-${invitation.timestamp}`}
-              className="mb-2 p-2 bg-gray-50 rounded"
+              className="mb-2 p-2 bg-gray-50 rounded transform transition-all duration-300 hover:scale-102 hover:shadow-md"
             >
-              <div className="text-sm">{invitation.fromNickname}</div>
+              <div className="text-sm font-medium">{invitation.fromNickname}</div>
               <div className="text-xs text-gray-500 mb-2">{invitation.from}</div>
               <div className="flex gap-2">
                 <button
                   onClick={() => handleAcceptInvitation(invitation)}
-                  className="text-xs bg-green-500 text-white px-2 py-1 rounded"
+                  disabled={processingInvitations.includes(invitation.from)}
+                  className={`
+                    text-xs px-2 py-1 rounded transition-all duration-200
+                    ${processingInvitations.includes(invitation.from)
+                      ? 'bg-gray-400'
+                      : 'bg-green-500 hover:bg-green-600'
+                    }
+                    text-white
+                  `}
                 >
-                  Accept
+                  {processingInvitations.includes(invitation.from)
+                    ? 'Processing...'
+                    : 'Accept'}
                 </button>
                 <button
                   onClick={() => handleRejectInvitation(invitation)}
-                  className="text-xs bg-red-500 text-white px-2 py-1 rounded"
+                  disabled={processingInvitations.includes(invitation.from)}
+                  className={`
+                    text-xs px-2 py-1 rounded transition-all duration-200
+                    ${processingInvitations.includes(invitation.from)
+                      ? 'bg-gray-400'
+                      : 'bg-red-500 hover:bg-red-600'
+                    }
+                    text-white
+                  `}
                 >
-                  Reject
+                  {processingInvitations.includes(invitation.from)
+                    ? 'Processing...'
+                    : 'Reject'}
                 </button>
               </div>
             </div>
@@ -240,9 +235,11 @@ export default function ContactsList({
           contacts.map((contact) => (
             <div
               key={contact.address}
-              className={`p-4 border-b border-gray-200 hover:bg-gray-50 ${
-                selectedContact?.address === contact.address ? 'bg-gray-50' : ''
-              }`}
+              className={`
+                p-4 border-b border-gray-200
+                hover:bg-gray-50 transition-colors duration-200
+                ${selectedContact?.address === contact.address ? 'bg-gray-50' : ''}
+              `}
             >
               <div 
                 className="cursor-pointer"
@@ -255,7 +252,7 @@ export default function ContactsList({
                 <button
                   onClick={() => onStartChat(contact)}
                   disabled={isCreatingChat}
-                  className="mt-2 w-full bg-green-500 hover:bg-green-600 text-white text-sm font-semibold py-1 px-2 rounded disabled:opacity-50"
+                  className="mt-2 w-full bg-green-500 hover:bg-green-600 text-white text-sm font-semibold py-1 px-2 rounded disabled:opacity-50 transition-colors duration-200"
                 >
                   {isCreatingChat ? 'Creating Chat...' : 'Start Chat'}
                 </button>
@@ -269,8 +266,31 @@ export default function ContactsList({
       <AddContactModal
         isOpen={isAddModalOpen}
         onClose={() => setIsAddModalOpen(false)}
-        onAdd={handleAddContact}
+        onAdd={async (address, nickname) => {
+          try {
+            await AOProcess.sendInvitation(address, nickname);
+            setNotification({
+              type: 'success',
+              message: 'Invitation sent successfully'
+            });
+            setIsAddModalOpen(false);
+          } catch (error) {
+            setNotification({
+              type: 'error',
+              message: error instanceof Error ? error.message : 'Failed to send invitation'
+            });
+          }
+        }}
       />
+
+      {/* Notification */}
+      {notification && (
+        <Notification
+          type={notification.type}
+          message={notification.message}
+          onClose={() => setNotification(null)}
+        />
+      )}
     </div>
   );
 } 

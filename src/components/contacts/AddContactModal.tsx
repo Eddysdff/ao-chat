@@ -44,11 +44,23 @@ export default function AddContactModal({ isOpen, onClose, onAdd }: AddContactMo
 
     try {
       setIsSubmitting(true);
+      console.log('[AddContact] Submitting:', { address, nickname });
+
+      // 检查当前状态
+      const beforeState = await AOProcess.debugState();
+      console.log('[AddContact] State before adding:', beforeState);
+
       await onAdd(address.trim(), nickname.trim());
+
+      // 检查更新后的状态
+      const afterState = await AOProcess.debugState();
+      console.log('[AddContact] State after adding:', afterState);
+
       setAddress('');
       setNickname('');
       onClose();
     } catch (error) {
+      console.error('[AddContact] Submit failed:', error);
       setError(error instanceof Error ? error.message : 'Failed to add contact');
     } finally {
       setIsSubmitting(false);

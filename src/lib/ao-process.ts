@@ -38,8 +38,9 @@ export class AOProcess {
           ? data 
           : JSON.stringify(data);
 
+        console.log('[AO] Encoded message data:', messageData);
+
         const signer = createDataItemSigner(window.arweaveWallet);
-        
         const encodedData = new TextEncoder().encode(messageData);
 
         const result = await client.message({
@@ -61,24 +62,14 @@ export class AOProcess {
           } catch (error) {
             console.error('[AO] Failed to parse decoded result:', error);
             return {
-              success: true,
-              data: decodedResult,
-              contacts: [],
-              invitations: []
+              success: false,
+              error: 'Invalid response format',
+              data: decodedResult
             };
           }
         }
 
-        if (typeof result === 'object' && !Array.isArray(result)) {
-          return result;
-        }
-
-        return {
-          success: true,
-          data: result,
-          contacts: [],
-          invitations: []
-        };
+        return this.processResult(result);
 
       } catch (error) {
         console.warn(`[AO] Attempt ${i + 1} failed:`, error);
@@ -154,14 +145,22 @@ export class AOProcess {
     console.log('[AO] Sending invitation:', { address, nickname });
     
     try {
+      // 检查当前状态
+      const beforeState = await this.debugState();
+      console.log('[AO] State before invitation:', beforeState);
+
       const data = {
         to: address,
         nickname: nickname,
-        timestamp: Date.now()
+        timestamp: Math.floor(Date.now() / 1000)  // 使用Unix时间戳
       };
 
       const result = await this.sendMessageWithRetry('SendInvitation', data);
       console.log('[AO] Send invitation result:', result);
+
+      // 检查更新后的状态
+      const afterState = await this.debugState();
+      console.log('[AO] State after invitation:', afterState);
 
       return result;
     } catch (error) {
@@ -189,8 +188,14 @@ export class AOProcess {
   static async getPendingInvitations(): Promise<ProcessResult> {
     try {
       console.log('[AO] Getting pending invitations...');
+      
+      // 检查当前状态
+      const state = await this.debugState();
+      console.log('[AO] Current state:', state);
+
       const result = await this.sendMessageWithRetry('GetPendingInvitations');
       console.log('[AO] Get invitations raw result:', result);
+      
       return this.processResult(result);
     } catch (error) {
       console.error('[AO] Get invitations error:', error);
@@ -287,5 +292,16 @@ export class AOProcess {
     targetProcess: string = PROCESS_ID
   ): Promise<ProcessResult> {
     return this.sendMessageWithRetry(action, data, targetProcess);
+  }
+
+  static async debugState(): Promise<ProcessResult> {
+    try {
+      const result = await this.sendMessageWithRetry('DebugState');
+      console.log('[AO] Debug state result:', result);
+      return result;
+    } catch (error) {
+      console.error('[AO] Debug state error:', error);
+      throw error;
+    }
   }
 } 

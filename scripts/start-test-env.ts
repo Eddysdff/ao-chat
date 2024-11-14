@@ -1,20 +1,36 @@
-import ArLocal from 'arlocal';
-import { exec } from 'child_process';
+import { ArLocal } from 'arlocal';
+import Arweave from 'arweave';
 
 async function startTestEnvironment() {
-  // 启动 ArLocal
-  const arlocal = new ArLocal(1984, false);
-  await arlocal.start();
-  console.log('ArLocal started on port 1984');
+  try {
+    // 启动本地 Arweave 节点
+    const arlocal = new ArLocal(1984);
+    await arlocal.start();
+    console.log('ArLocal started on port 1984');
 
-  // 启动 AO 节点
-  exec('aos node', (error, stdout, stderr) => {
-    if (error) {
-      console.error('Error starting AO node:', error);
-      return;
-    }
-    console.log('AO node output:', stdout);
-  });
+    // 初始化 Arweave 客户端
+    const arweave = Arweave.init({
+      host: 'localhost',
+      port: 1984,
+      protocol: 'http'
+    });
+
+    // 生成测试钱包
+    const wallet = await arweave.wallets.generate();
+    const address = await arweave.wallets.jwkToAddress(wallet);
+    console.log('Test wallet generated:', address);
+
+    // 保持进程运行
+    process.on('SIGINT', async () => {
+      console.log('Stopping ArLocal...');
+      await arlocal.stop();
+      process.exit();
+    });
+
+  } catch (error) {
+    console.error('Failed to start test environment:', error);
+    process.exit(1);
+  }
 }
 
-startTestEnvironment().catch(console.error);
+startTestEnvironment();

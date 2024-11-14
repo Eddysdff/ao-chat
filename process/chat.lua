@@ -69,7 +69,7 @@ end
 
 -- 处理发送邀请
 Handlers.add(
-  "send-invitation",
+  "SendInvitation",
   Handlers.utils.hasMatchingTag("Action", "SendInvitation"),
   function(msg)
     local from = msg.From
@@ -77,7 +77,8 @@ Handlers.add(
     local fromNickname = msg.Data.nickname
 
     -- 添加调试日志
-    print("Sending invitation from:", from)
+    print("Processing invitation request:")
+    print("From:", from)
     print("To:", to)
     print("Nickname:", fromNickname)
 
@@ -114,7 +115,7 @@ Handlers.add(
       to = to,
       fromNickname = fromNickname,
       status = "pending",
-      timestamp = os.time()
+      timestamp = msg.Data.timestamp or os.time()
     }
 
     -- 添加邀请到列表
@@ -268,7 +269,7 @@ Handlers.add(
 
 -- 获取待处理的邀请
 Handlers.add(
-  "get-pending-invitations",
+  "GetPendingInvitations",
   Handlers.utils.hasMatchingTag("Action", "GetPendingInvitations"),
   function(msg)
     local address = msg.From

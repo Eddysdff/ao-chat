@@ -11,8 +11,8 @@ export const config = {
       }
     },
     processId: {
-      development: 'IOKr_HIFuxPdW4M_R8Dnzico126_t5b2Wdwa_5lqlS0',
-      production: 'IOKr_HIFuxPdW4M_R8Dnzico126_t5b2Wdwa_5lqlS0'
+      development: 't2JcI3ENA47-pWyo7qfPjnQzI8-i00MxPVjqSVhDFSE',
+      production: 't2JcI3ENA47-pWyo7qfPjnQzI8-i00MxPVjqSVhDFSE'
     }
   },
   arweave: {
