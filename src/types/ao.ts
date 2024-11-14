@@ -5,16 +5,9 @@ export interface Contact {
 
 export interface ContactInvitation {
   from: string;
+  fromNickname: string;
   to: string;
-  fromNickname: string;
   status: 'pending' | 'accepted' | 'rejected';
-  timestamp: number;
-}
-
-export interface ChatInvitation {
-  processId: string;
-  from: string;
-  fromNickname: string;
   timestamp: number;
 }
 
@@ -24,7 +17,13 @@ export interface ProcessResult {
   data?: any;
   contacts?: Contact[];
   invitations?: ContactInvitation[];
-  chatInvitations?: ChatInvitation[];
+}
+
+export interface ChatInvitation {
+  processId: string;
+  from: string;
+  fromNickname: string;
+  timestamp: number;
 }
 
 export interface ChatRoom {

@@ -24,31 +24,69 @@ export default function ContactsList({
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const verifyProcessState = async () => {
+    try {
+      const result = await AOProcess.sendMessage('DebugState');
+      console.log('[Contacts] Process state:', result);
+      return result.success;
+    } catch (error) {
+      console.error('[Contacts] Process state check failed:', error);
+      return false;
+    }
+  };
+
   const loadData = async () => {
     try {
       setIsLoading(true);
+      console.log('[Contacts] Loading data...');
       
-      const debugResult = await AOProcess.sendMessage('DebugState', {});
-      console.log('Process State Debug:', debugResult);
-
       const [contactsResult, invitationsResult] = await Promise.all([
         AOProcess.getContacts(),
         AOProcess.getPendingInvitations()
       ]);
 
-      console.log('Contacts result:', contactsResult);
-      console.log('Invitations result:', invitationsResult);
+      console.log('[Contacts] Raw results:', {
+        contacts: contactsResult,
+        invitations: invitationsResult
+      });
 
-      if (contactsResult.success) {
-        setContacts(contactsResult.contacts || []);
+      // 处理联系人数据
+      if (contactsResult && contactsResult.success) {
+        const contactsList = contactsResult.contacts || [];
+        if (!Array.isArray(contactsList)) {
+          console.error('[Contacts] Invalid contacts data:', contactsList);
+          setContacts([]);
+        } else {
+          console.log('[Contacts] Setting contacts:', contactsList);
+          setContacts(contactsList);
+        }
+      } else {
+        const error = contactsResult?.error || 'Unknown error';
+        console.error('[Contacts] Failed to get contacts:', error);
+        setContacts([]);
       }
-      if (invitationsResult.success) {
-        setInvitations(invitationsResult.invitations || []);
+
+      // 处理邀请数据
+      if (invitationsResult && invitationsResult.success) {
+        const invitationsList = invitationsResult.invitations || [];
+        if (!Array.isArray(invitationsList)) {
+          console.error('[Contacts] Invalid invitations data:', invitationsList);
+          setInvitations([]);
+        } else {
+          console.log('[Contacts] Setting invitations:', invitationsList);
+          setInvitations(invitationsList);
+        }
+      } else {
+        const error = invitationsResult?.error || 'Unknown error';
+        console.error('[Contacts] Failed to get invitations:', error);
+        setInvitations([]);
       }
+
       setError(null);
     } catch (error) {
-      console.error('Failed to load data:', error);
-      setError('Failed to load contacts and invitations');
+      console.error('[Contacts] Load data failed:', error);
+      setContacts([]);
+      setInvitations([]);
     } finally {
       setIsLoading(false);
     }
@@ -56,14 +94,26 @@ export default function ContactsList({
 
   const handleAddContact = async (address: string, nickname: string) => {
     try {
-      console.log('Sending invitation to:', address, 'with nickname:', nickname);
+      // 基本验证
+      if (!address || !nickname) {
+        throw new Error('Address and nickname are required');
+      }
+
+      // 验证地址格式
+      if (!/^[a-zA-Z0-9_-]{43}$/.test(address)) {
+        throw new Error('Invalid Arweave address format');
+      }
+
+      // 验证昵称长度
+      if (nickname.length > 32) {
+        throw new Error('Nickname is too long (max 32 characters)');
+      }
+
+      console.log('[Contacts] Sending invitation to:', address, 'with nickname:', nickname);
       const result = await AOProcess.sendInvitation(address, nickname);
-      console.log('Send invitation result:', result);
+      console.log('[Contacts] Send invitation result:', result);
 
       if (result.success) {
-        const debugResult = await AOProcess.sendMessage('DebugState', {});
-        console.log('Process State after invitation:', debugResult);
-
         await loadData();
         setIsAddModalOpen(false);
         setError(null);
@@ -71,10 +121,28 @@ export default function ContactsList({
         setError(result.error || 'Failed to send invitation');
       }
     } catch (error) {
-      console.error('Failed to add contact:', error);
-      setError('Failed to send invitation');
+      console.error('[Contacts] Failed to add contact:', error);
+      setError(error instanceof Error ? error.message : 'Failed to add contact');
     }
   };
+
+  useEffect(() => {
+    let mounted = true;
+    let interval: NodeJS.Timeout;
+
+    const refreshData = async () => {
+      if (!mounted) return;
+      await loadData();
+    };
+
+    refreshData();
+    interval = setInterval(refreshData, 30000);
+
+    return () => {
+      mounted = false;
+      clearInterval(interval);
+    };
+  }, []);
 
   const handleAcceptInvitation = async (invitation: ContactInvitation) => {
     try {
@@ -108,12 +176,6 @@ export default function ContactsList({
       setError('Failed to reject invitation');
     }
   };
-
-  useEffect(() => {
-    loadData();
-    const interval = setInterval(loadData, 10000); // 每10秒刷新一次
-    return () => clearInterval(interval);
-  }, []);
 
   return (
     <div className="w-80 border-r border-gray-200 h-full flex flex-col">
