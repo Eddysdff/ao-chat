@@ -2,7 +2,7 @@
 
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { getActiveAddress } from '@/lib/arconnect';
+import { ArConnectService } from '@/lib/arconnect';
 import { AOProcess } from '@/lib/ao-process';
 import Navbar from '@/components/Navbar';
 import ContactsList from '@/components/contacts/ContactsList';
@@ -16,31 +16,46 @@ export default function ChatPage() {
   const [activeChatRoom, setActiveChatRoom] = useState<ChatRoom | null>(null);
   const [isCreatingChat, setIsCreatingChat] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  const handleConnect = async () => {
+    try {
+      setIsLoading(true);
+      const addr = await ArConnectService.connectWallet();
+      setAddress(addr);
+      setError(null);
+    } catch (error) {
+      console.error('Connection failed:', error);
+      setError('Failed to connect wallet');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const checkExistingConnection = async () => {
+    try {
+      setIsLoading(true);
+      const isConnected = await ArConnectService.isConnected();
+      
+      if (isConnected) {
+        const addr = await ArConnectService.getAddress();
+        setAddress(addr);
+        setError(null);
+      } else {
+        setAddress(null);
+      }
+    } catch (error) {
+      console.error('Connection check failed:', error);
+      setError('Failed to check wallet connection');
+      setAddress(null);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   useEffect(() => {
-    const checkConnection = async () => {
-      try {
-        const addr = await getActiveAddress();
-        if (!addr) {
-          router.push('/');
-          return;
-        }
-        
-        setAddress(addr);
-        
-        // 只检查一次Process健康状态
-        const isHealthy = await AOProcess.checkHealth();
-        if (!isHealthy) {
-          setError('Unable to connect to AO Process. Please try again later.');
-        }
-      } catch (error) {
-        console.error('Connection check failed:', error);
-        router.push('/');
-      }
-    };
-
-    checkConnection();
-  }, []); // 空依赖数组确保只运行一次
+    checkExistingConnection();
+  }, []);
 
   const handleStartChat = async (contact: Contact) => {
     if (!address) return;
@@ -98,24 +113,32 @@ export default function ChatPage() {
   const handleReconnect = async () => {
     try {
       setError(null);
-      await checkConnection();
+      await checkExistingConnection();
     } catch (error) {
       console.error('Reconnection failed:', error);
       setError('Failed to reconnect. Please try again.');
     }
   };
 
+  if (isLoading) {
+    return <div className="flex h-screen items-center justify-center">
+      <div className="text-lg">Loading...</div>
+    </div>;
+  }
+
   if (!address) {
     return (
-      <div className="h-screen flex items-center justify-center">
+      <div className="flex h-screen items-center justify-center">
         <div className="text-center">
-          <p className="text-gray-500 mb-4">Connecting to wallet...</p>
+          <h1 className="text-2xl mb-4">Welcome to Chat</h1>
           <button
-            onClick={handleReconnect}
-            className="text-green-500 hover:text-green-600"
+            onClick={handleConnect}
+            className="bg-green-500 hover:bg-green-600 text-white px-6 py-2 rounded"
+            disabled={isLoading}
           >
-            Retry Connection
+            {isLoading ? 'Connecting...' : 'Connect Wallet'}
           </button>
+          {error && <div className="text-red-500 mt-2">{error}</div>}
         </div>
       </div>
     );
