@@ -20,6 +20,7 @@
   },
   "dependencies": {
     "@permaweb/ao-sdk": "^0.0.23",
+    "@permaweb/aoconnect": "^0.0.61",
     "arweave": "^1.14.4",
     "next": "14.0.4",
     "react": "^18",

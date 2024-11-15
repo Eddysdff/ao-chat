@@ -73,7 +73,8 @@ export class ArConnectService {
     if (!window.arweaveWallet) return false;
     try {
       const permissions = await window.arweaveWallet.getPermissions();
-      return permissions.length > 0;
+      const requiredPermissions = ['ACCESS_ADDRESS', 'SIGN_TRANSACTION', 'DISPATCH'];
+      return requiredPermissions.every(perm => permissions.includes(perm));
     } catch {
       return false;
     }

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { AOProcess } from '@/lib/ao-process';
 
 interface AddContactModalProps {
   isOpen: boolean;
@@ -66,6 +67,8 @@ export default function AddContactModal({ isOpen, onClose, onAdd }: AddContactMo
       setIsSubmitting(false);
     }
   };
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">

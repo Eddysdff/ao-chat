@@ -7,12 +7,11 @@ import { AOProcess } from '@/lib/ao-process';
 import Navbar from '@/components/Navbar';
 import ContactsList from '@/components/contacts/ContactsList';
 import ChatWindow from '@/components/chat/ChatWindow';
-import { Contact, ChatRoom } from '@/types/ao';
+import { ChatRoom } from '@/types/ao';
 
 export default function ChatPage() {
   const router = useRouter();
   const [address, setAddress] = useState<string | null>(null);
-  const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
   const [activeChatRoom, setActiveChatRoom] = useState<ChatRoom | null>(null);
   const [isCreatingChat, setIsCreatingChat] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -54,40 +53,46 @@ export default function ChatPage() {
   };
 
   useEffect(() => {
-    checkExistingConnection();
+    let mounted = true;
+
+    const checkConnection = async () => {
+      if (!mounted) return;
+      await checkExistingConnection();
+    };
+
+    checkConnection();
+
+    return () => {
+      mounted = false;
+    };
   }, []);
 
-  const handleStartChat = async (contact: Contact) => {
+  const handleCreateChat = async (participantAddress: string) => {
     if (!address) return;
     
     try {
       setIsCreatingChat(true);
       setError(null);
 
-      // 添加重试机制
-      const maxRetries = 3;
-      let result;
+      console.log('[Chat] Creating chatroom with participant:', participantAddress);
       
-      for (let i = 0; i < maxRetries; i++) {
-        try {
-          result = await AOProcess.createChatroom(contact.address);
-          if (result.success && result.chatroom) {
-            break;
-          }
-        } catch (error) {
-          if (i === maxRetries - 1) throw error;
-          await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, i)));
-        }
-      }
-      
+      // 先检查进程状态
+      const processState = await AOProcess.debugState();
+      console.log('[Chat] Current process state:', processState);
+
+      const result = await AOProcess.createChatroom(participantAddress);
+      console.log('[Chat] Create chatroom result:', result);
+
       if (result?.success && result.chatroom) {
         setActiveChatRoom(result.chatroom);
       } else {
+        console.error('[Chat] Failed to create chatroom:', result);
         throw new Error(result?.error || 'Failed to create chatroom');
       }
     } catch (error) {
-      console.error('Error creating chatroom:', error);
-      setError('Failed to create chat room. Please try again.');
+      console.error('[Chat] Error creating chatroom:', error);
+      setError(error instanceof Error ? error.message : 'Failed to create chat room. Please try again.');
+      throw error; // 重新抛出错误以便上层组件处理
     } finally {
       setIsCreatingChat(false);
     }
@@ -163,15 +168,12 @@ export default function ChatPage() {
       )}
       <div className="flex flex-1 overflow-hidden">
         <ContactsList
-          selectedContact={selectedContact}
-          onSelectContact={setSelectedContact}
-          onStartChat={handleStartChat}
+          onCreateChat={handleCreateChat}
           onChatInvitationAccepted={handleChatInvitationAccepted}
           isCreatingChat={isCreatingChat}
         />
         <ChatWindow
           currentUserAddress={address}
-          selectedContact={selectedContact}
           chatRoom={activeChatRoom}
         />
       </div>
