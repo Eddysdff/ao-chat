@@ -2,25 +2,26 @@
 
 import { useEffect, useState } from 'react';
 import { AOProcess } from '@/lib/ao-process';
-import { ChatRoom, ChatInvitation } from '@/types/ao';
+import { Contact, ContactInvitation } from '@/types/ao';
 import Notification from '../common/Notification';
 
 interface ContactsListProps {
-  onCreateChat: (participantAddress: string) => Promise<void>;
-  onChatInvitationAccepted: (chatRoom: ChatRoom) => Promise<void>;
-  isCreatingChat: boolean;
+  onSelectContact: (contact: Contact) => void;
+  onStartChat: (contact: Contact) => void;
+  selectedContact: Contact | null;
 }
 
-// 创建聊天模态框组件
-interface CreateChatModalProps {
+// 添加联系人模态框组件
+interface AddContactModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSubmit: (address: string) => Promise<void>;
+  onSubmit: (address: string, nickname: string) => Promise<void>;
   isSubmitting: boolean;
 }
 
-function CreateChatModal({ isOpen, onClose, onSubmit, isSubmitting }: CreateChatModalProps) {
+function AddContactModal({ isOpen, onClose, onSubmit, isSubmitting }: AddContactModalProps) {
   const [address, setAddress] = useState('');
+  const [nickname, setNickname] = useState('');
   const [error, setError] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -35,15 +36,19 @@ function CreateChatModal({ isOpen, onClose, onSubmit, isSubmitting }: CreateChat
       setError('Invalid Arweave address format');
       return;
     }
+    if (!nickname) {
+      setError('Nickname is required');
+      return;
+    }
 
     try {
-      console.log('[CreateChat] Attempting to create chat with address:', address);
-      await onSubmit(address.trim());
+      await onSubmit(address.trim(), nickname.trim());
       setAddress('');
+      setNickname('');
       onClose();
     } catch (error) {
-      console.error('[CreateChat] Error details:', error);
-      setError(error instanceof Error ? error.message : 'Failed to create chat');
+      console.error('[AddContact] Error:', error);
+      setError(error instanceof Error ? error.message : 'Failed to add contact');
     }
   };
 
@@ -52,7 +57,7 @@ function CreateChatModal({ isOpen, onClose, onSubmit, isSubmitting }: CreateChat
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
       <div className="bg-white rounded-lg p-6 w-96">
-        <h2 className="text-xl font-bold mb-4">Create New Chat</h2>
+        <h2 className="text-xl font-bold mb-4">Add New Contact</h2>
         {error && (
           <div className="mb-4 p-2 bg-red-100 text-red-600 rounded">
             {error}
@@ -61,12 +66,24 @@ function CreateChatModal({ isOpen, onClose, onSubmit, isSubmitting }: CreateChat
         <form onSubmit={handleSubmit}>
           <div className="mb-4">
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              Participant AR Address
+              AR Address
             </label>
             <input
               type="text"
               value={address}
               onChange={(e) => setAddress(e.target.value)}
+              className="w-full p-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-green-500"
+              required
+            />
+          </div>
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Nickname
+            </label>
+            <input
+              type="text"
+              value={nickname}
+              onChange={(e) => setNickname(e.target.value)}
               className="w-full p-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-green-500"
               required
             />
@@ -84,7 +101,7 @@ function CreateChatModal({ isOpen, onClose, onSubmit, isSubmitting }: CreateChat
               disabled={isSubmitting}
               className="px-4 py-2 text-sm font-medium text-white bg-green-500 hover:bg-green-600 rounded disabled:opacity-50"
             >
-              {isSubmitting ? 'Creating...' : 'Create Chat'}
+              {isSubmitting ? 'Adding...' : 'Add Contact'}
             </button>
           </div>
         </form>
@@ -94,13 +111,13 @@ function CreateChatModal({ isOpen, onClose, onSubmit, isSubmitting }: CreateChat
 }
 
 export default function ContactsList({
-  onCreateChat,
-  onChatInvitationAccepted,
-  isCreatingChat
+  onSelectContact,
+  onStartChat,
+  selectedContact
 }: ContactsListProps) {
-  const [chatRooms, setChatRooms] = useState<ChatRoom[]>([]);
-  const [chatInvitations, setChatInvitations] = useState<ChatInvitation[]>([]);
-  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [contacts, setContacts] = useState<Contact[]>([]);
+  const [invitations, setInvitations] = useState<ContactInvitation[]>([]);
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notification, setNotification] = useState<{
@@ -111,68 +128,114 @@ export default function ContactsList({
   const loadData = async () => {
     try {
       setIsLoading(true);
-      console.log('[Chat] Loading data...');
+      console.log('[Contacts] Loading data...');
       
-      const result = await AOProcess.getChatrooms();
-      console.log('[Chat] Get chatrooms result:', result);
+      // 获取邀请
+      const invitationsResult = await AOProcess.getPendingInvitations();
+      console.log('[Contacts] Raw invitations result:', invitationsResult);
 
-      if (result.success) {
-        setChatRooms(result.chatrooms || []);
-        setChatInvitations(result.invitations || []);
-      } else {
-        console.error('[Chat] Failed to load chatrooms:', result.error);
+      // 详细检查返回的数据结构
+      if (invitationsResult.success) {
+        // 检查Output中的data
+        if (invitationsResult.Output?.data) {
+          try {
+            const parsedData = JSON.parse(invitationsResult.Output.data);
+            console.log('[Contacts] Parsed invitations data:', parsedData);
+            setInvitations(parsedData.invitations || []);
+          } catch (error) {
+            console.error('[Contacts] Failed to parse invitations data:', error);
+          }
+        } else {
+          console.log('[Contacts] No invitations data in Output');
+          setInvitations([]);
+        }
+      }
+
+      // 获取联系人
+      const contactsResult = await AOProcess.getContacts();
+      console.log('[Contacts] Raw contacts result:', contactsResult);
+
+      if (contactsResult.success) {
+        if (contactsResult.Output?.data) {
+          try {
+            const parsedData = JSON.parse(contactsResult.Output.data);
+            console.log('[Contacts] Parsed contacts data:', parsedData);
+            setContacts(parsedData.contacts || []);
+          } catch (error) {
+            console.error('[Contacts] Failed to parse contacts data:', error);
+          }
+        }
       }
 
       setError(null);
     } catch (error) {
-      console.error('[Chat] Load data failed:', error);
-      setError('Failed to load chats');
+      console.error('[Contacts] Load data failed:', error);
+      setError('Failed to load contacts and invitations');
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleAcceptChatInvitation = async (invitation: ChatInvitation) => {
+  const handleAddContact = async (address: string, nickname: string) => {
     try {
-      console.log('[Chat] Accepting chat invitation:', invitation);
-      await onChatInvitationAccepted(invitation);
       setNotification({
-        type: 'success',
-        message: 'Joined chat successfully'
+        type: 'info',
+        message: 'Sending invitation...'
       });
-      await loadData();
+
+      console.log('[Contacts] Adding contact:', { address, nickname });
+      
+      const result = await AOProcess.sendInvitation(address, nickname);
+      
+      if (result.error?.includes('initialization')) {
+        setNotification({
+          type: 'info',
+          message: 'Chat service is initializing, please wait a moment and try again.'
+        });
+        return;
+      }
+      
+      if (result.success) {
+        setNotification({
+          type: 'success',
+          message: 'Invitation sent successfully'
+        });
+        await loadData();
+      } else {
+        throw new Error(result.error || 'Failed to send invitation');
+      }
     } catch (error) {
-      console.error('[Chat] Accept chat invitation failed:', error);
+      console.error('[Contacts] Add contact failed:', error);
       setNotification({
         type: 'error',
-        message: 'Failed to join chat'
+        message: error instanceof Error ? error.message : 'Failed to add contact'
       });
     }
   };
 
-  const handleCreateChat = async (participantAddress: string) => {
+  const handleAcceptInvitation = async (invitation: ContactInvitation) => {
     try {
-      console.log('[Chat] Creating chatroom with:', participantAddress);
+      console.log('[Contacts] Accepting invitation:', invitation);
       
-      // 创建聊天室（包含spawn进程和发送邀请）
-      const result = await AOProcess.createChatroom(participantAddress);
+      const result = await AOProcess.acceptInvitation(
+        invitation.from,
+        `User-${invitation.from.slice(0, 6)}`
+      );
       
-      if (result.success && result.chatroom) {
+      if (result.success) {
         setNotification({
           type: 'success',
-          message: 'Chat room created and invitation sent'
+          message: 'Contact added successfully'
         });
-        
-        // 重新加载聊天室列表
         await loadData();
       } else {
-        throw new Error(result.error || 'Failed to create chat room');
+        throw new Error(result.error || 'Failed to accept invitation');
       }
     } catch (error) {
-      console.error('[Chat] Create chat failed:', error);
+      console.error('[Contacts] Accept invitation failed:', error);
       setNotification({
         type: 'error',
-        message: error instanceof Error ? error.message : 'Failed to create chat'
+        message: error instanceof Error ? error.message : 'Failed to accept invitation'
       });
     }
   };
@@ -197,13 +260,13 @@ export default function ContactsList({
 
   return (
     <div className="w-80 border-r border-gray-200 h-full flex flex-col">
-      {/* Create Chat Button */}
+      {/* Add Contact Button */}
       <div className="p-4 border-b border-gray-200">
         <button
-          onClick={() => setIsCreateModalOpen(true)}
+          onClick={() => setIsAddModalOpen(true)}
           className="w-full bg-green-500 hover:bg-green-600 text-white font-semibold py-2 px-4 rounded flex items-center justify-center transition-colors duration-200"
         >
-          <span className="mr-2">+</span> Create New Chat
+          <span className="mr-2">+</span> Add Contact
         </button>
       </div>
 
@@ -214,59 +277,80 @@ export default function ContactsList({
         </div>
       )}
 
-      {/* Chat Invitations */}
-      {chatInvitations.length > 0 && (
+      {/* Pending Invitations */}
+      {invitations.length > 0 && (
         <div className="p-4 border-b border-gray-200">
-          <h3 className="font-semibold mb-2">Chat Invitations</h3>
-          {chatInvitations.map((invitation) => (
+          <h3 className="font-semibold mb-2">Pending Invitations</h3>
+          {invitations.map((invitation) => (
             <div
-              key={invitation.processId}
+              key={`${invitation.from}-${invitation.timestamp}`}
               className="mb-2 p-2 bg-gray-50 rounded transform transition-all duration-300 hover:scale-102 hover:shadow-md"
             >
-              <div className="text-sm font-medium">From: {invitation.fromNickname}</div>
+              <div className="text-sm font-medium">{invitation.fromNickname}</div>
               <div className="text-xs text-gray-500 mb-2">{invitation.from}</div>
               <button
-                onClick={() => handleAcceptChatInvitation(invitation)}
+                onClick={() => handleAcceptInvitation(invitation)}
                 className="w-full text-xs bg-green-500 hover:bg-green-600 text-white px-2 py-1 rounded transition-colors duration-200"
               >
-                Join Chat
+                Accept
               </button>
             </div>
           ))}
         </div>
       )}
 
-      {/* Chat Rooms List */}
+      {/* Contacts List */}
       <div className="flex-1 overflow-y-auto">
         {isLoading ? (
           <div className="flex items-center justify-center h-32">
-            <div className="text-gray-500">Loading chats...</div>
+            <div className="text-gray-500">Loading contacts...</div>
           </div>
-        ) : chatRooms.length === 0 ? (
+        ) : contacts.length === 0 ? (
           <div className="text-center text-gray-500 mt-8">
-            No chats yet
+            No contacts yet
           </div>
         ) : (
-          chatRooms.map((chatRoom) => (
+          contacts.map((contact) => (
             <div
-              key={chatRoom.processId}
-              className="p-4 border-b border-gray-200 hover:bg-gray-50 transition-colors duration-200"
+              key={contact.address}
+              className={`
+                p-4 border-b border-gray-200
+                hover:bg-gray-50 transition-colors duration-200
+                ${selectedContact?.address === contact.address ? 'bg-gray-50' : ''}
+              `}
+              onClick={() => onSelectContact(contact)}
             >
-              <div className="font-semibold">Chat Room</div>
-              <div className="text-sm text-gray-500">
-                Participants: {chatRoom.participants.length}
+              <div className="flex justify-between items-center">
+                <div>
+                  <div className="font-semibold">{contact.nickname}</div>
+                  <div className="text-sm text-gray-500">{contact.address}</div>
+                </div>
+                <div className={`w-2 h-2 rounded-full ${
+                  contact.status === 'online' ? 'bg-green-500' : 'bg-gray-300'
+                }`} />
               </div>
+              {selectedContact?.address === contact.address && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onStartChat(contact);
+                  }}
+                  className="mt-2 w-full bg-green-500 hover:bg-green-600 text-white text-sm font-semibold py-1 px-2 rounded transition-colors duration-200"
+                >
+                  Start Chat
+                </button>
+              )}
             </div>
           ))
         )}
       </div>
 
-      {/* Create Chat Modal */}
-      <CreateChatModal
-        isOpen={isCreateModalOpen}
-        onClose={() => setIsCreateModalOpen(false)}
-        onSubmit={handleCreateChat}
-        isSubmitting={isCreatingChat}
+      {/* Add Contact Modal */}
+      <AddContactModal
+        isOpen={isAddModalOpen}
+        onClose={() => setIsAddModalOpen(false)}
+        onSubmit={handleAddContact}
+        isSubmitting={false}
       />
 
       {/* Notification */}

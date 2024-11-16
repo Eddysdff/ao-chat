@@ -16,12 +16,12 @@
     "test:unit": "jest __tests__/unit",
     "test:integration": "jest __tests__/integration",
     "test:e2e": "playwright test __tests__/e2e",
-    "test:coverage": "jest --coverage"
+    "test:coverage": "jest --coverage",
+    "deploy:module": "node scripts/deploy-module.js"
   },
   "dependencies": {
     "@permaweb/ao-sdk": "^0.0.23",
     "@permaweb/aoconnect": "^0.0.61",
-    "arweave": "^1.14.4",
     "next": "14.0.4",
     "react": "^18",
     "react-dom": "^18"
@@ -33,6 +33,7 @@
     "@types/react": "^18",
     "@types/react-dom": "^18",
     "arlocal": "^1.1.66",
+    "arweave": "^1.15.5",
     "autoprefixer": "^10.0.1",
     "eslint": "^8",
     "eslint-config-next": "14.0.4",

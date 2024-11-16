@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { AOProcess } from '@/lib/ao-process';
-import { Contact, ChatRoom, Message, ChatInvitation } from '@/types/ao';
+import { Contact, ChatMessage } from '@/types/ao';
 import { Encryption } from '@/lib/encryption';
 import VideoCallModal from '@/components/video/VideoCallModal';
 import { WebRTCService } from '@/lib/webrtc';
@@ -10,88 +10,76 @@ import { WebRTCService } from '@/lib/webrtc';
 interface ChatWindowProps {
   currentUserAddress: string;
   selectedContact: Contact | null;
-  chatRoom: ChatRoom | null;
 }
 
 export default function ChatWindow({
   currentUserAddress,
-  selectedContact,
-  chatRoom
+  selectedContact
 }: ChatWindowProps) {
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [hasMore, setHasMore] = useState(true);
-  const [isLoadingMore, setIsLoadingMore] = useState(false);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const messageListRef = useRef<HTMLDivElement>(null);
-  const [keyPair, setKeyPair] = useState<CryptoKeyPair | null>(null);
-  const [sharedKey, setSharedKey] = useState<CryptoKey | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [isVideoCallActive, setIsVideoCallActive] = useState(false);
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const [isAudioEnabled, setIsAudioEnabled] = useState(true);
   const [isVideoEnabled, setIsVideoEnabled] = useState(true);
+  const [keyPair, setKeyPair] = useState<CryptoKeyPair | null>(null);
+  const [sharedKey, setSharedKey] = useState<CryptoKey | null>(null);
   const webrtcService = useRef<WebRTCService | null>(null);
-  const [connectionStrategy, setConnectionStrategy] = useState<string>('');
-  const [chatInvitations, setChatInvitations] = useState<ChatInvitation[]>([]);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // 滚动到最新消息
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
-  // 保存滚动位置
-  const saveScrollPosition = () => {
-    const messageList = messageListRef.current;
-    if (!messageList) return 0;
-    return messageList.scrollHeight - messageList.scrollTop;
-  };
-
-  // 恢复滚动位置
-  const restoreScrollPosition = (previousHeight: number) => {
-    const messageList = messageListRef.current;
-    if (!messageList) return;
-    messageList.scrollTop = messageList.scrollHeight - previousHeight;
-  };
-
   // 加载消息历史
-  const loadMessages = async (page: number = 1) => {
-    if (!chatRoom?.processId) return;
-    
+  const loadMessages = async () => {
+    if (!selectedContact) return;
+
     try {
       setIsLoading(true);
-      const result = await AOProcess.getChatroomMessages(
-        chatRoom.processId,
-        page
-      );
+      const result = await AOProcess.getMessages(selectedContact.address);
       
-      if (result.success) {
-        if (page === 1) {
-          setMessages(result.messages);
-          scrollToBottom();
-        } else {
-          const previousHeight = saveScrollPosition();
-          setMessages(prev => [...result.messages, ...prev]);
-          setTimeout(() => restoreScrollPosition(previousHeight), 0);
-        }
-        setHasMore(result.hasMore);
-      } else {
-        console.error('Failed to load messages:', result.error);
+      if (result.success && result.messages) {
+        const decryptedMessages = await Promise.all(
+          result.messages.map(async (msg) => {
+            if (msg.encrypted && sharedKey) {
+              try {
+                const decrypted = await Encryption.decryptMessage(
+                  msg.content,
+                  msg.iv || '',
+                  sharedKey
+                );
+                return { ...msg, content: decrypted };
+              } catch (error) {
+                console.error('[Chat] Failed to decrypt message:', error);
+                return { ...msg, content: '[Encrypted Message]' };
+              }
+            }
+            return msg;
+          })
+        );
+        
+        setMessages(decryptedMessages);
+        scrollToBottom();
       }
+      
+      setError(null);
     } catch (error) {
-      console.error('Failed to load messages:', error);
-      // 可以添加用户提示
+      console.error('[Chat] Load messages failed:', error);
+      setError('Failed to load messages');
     } finally {
       setIsLoading(false);
     }
   };
 
-  // 初始化密钥
+  // 初始化加密
   useEffect(() => {
-    const initializeKeys = async () => {
-      if (!chatRoom) return;
+    const initializeEncryption = async () => {
+      if (!selectedContact) return;
 
       try {
         // 生成或获取密钥对
@@ -101,224 +89,100 @@ export default function ChatWindow({
           setKeyPair(pair);
         }
 
-        // 存储公钥
+        // 导出并存储公钥
         const publicJwk = await Encryption.exportPublicKey(pair.publicKey);
-        await AOProcess.sendMessage(
-          'StorePublicKey',
-          { publicKey: publicJwk },
-          chatRoom.processId
-        );
+        const privateJwk = await Encryption.exportPrivateKey(pair.privateKey);
 
-        // 获取对方的公钥
-        const result = await AOProcess.sendMessage(
-          'GetPublicKey',
-          { address: selectedContact.address },
-          chatRoom.processId
+        // 生成共享密钥
+        const shared = await Encryption.deriveSharedKey(
+          pair.publicKey,
+          pair.privateKey
         );
+        setSharedKey(shared);
 
-        if (result.success && result.publicKey) {
-          const theirPublicKey = await Encryption.importPublicKey(result.publicKey);
-          const shared = await Encryption.deriveSharedKey(
-            theirPublicKey,
-            pair.privateKey
-          );
-          setSharedKey(shared);
-        }
       } catch (error) {
-        console.error('Failed to initialize encryption:', error);
+        console.error('[Chat] Encryption initialization failed:', error);
+        setError('Failed to initialize encryption');
       }
     };
 
-    initializeKeys();
-  }, [chatRoom?.processId]);
+    initializeEncryption();
+  }, [selectedContact]);
 
-  // 修改发送消息的函数
+  // 定期刷新消息
+  useEffect(() => {
+    if (!selectedContact) return;
+
+    let mounted = true;
+    let interval: NodeJS.Timeout;
+
+    const refreshMessages = async () => {
+      if (!mounted) return;
+      await loadMessages();
+    };
+
+    refreshMessages();
+    interval = setInterval(refreshMessages, 5000);
+
+    return () => {
+      mounted = false;
+      clearInterval(interval);
+    };
+  }, [selectedContact]);
+
+  // 发送消息
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!chatRoom?.processId || !newMessage.trim() || !sharedKey) return;
+    if (!selectedContact || !newMessage.trim()) return;
 
     try {
-      // 加密消息
-      const { encrypted, iv } = await Encryption.encryptMessage(
-        newMessage.trim(),
-        sharedKey
+      let content = newMessage.trim();
+      let encrypted = false;
+
+      // 如果有共享密钥，加密消息
+      if (sharedKey) {
+        const { encrypted: encryptedContent, iv } = await Encryption.encryptMessage(
+          content,
+          sharedKey
+        );
+        content = encryptedContent;
+        encrypted = true;
+      }
+
+      const result = await AOProcess.sendMessage(
+        selectedContact.address,
+        content,
+        encrypted
       );
 
-      // 发送加密后的消息
-      const result = await AOProcess.sendChatroomMessage(
-        chatRoom.processId,
-        encrypted,
-        iv
-      );
-      
       if (result.success) {
         setNewMessage('');
-        await loadMessages(1);
+        await loadMessages();
       } else {
-        console.error('Failed to send message:', result.error);
-        // 可以添加用户提示
+        throw new Error(result.error || 'Failed to send message');
       }
     } catch (error) {
-      console.error('Failed to send message:', error);
-      // 可以添加用户提示
+      console.error('[Chat] Send message failed:', error);
+      setError('Failed to send message');
     }
   };
 
-  // 修改消息显示逻辑
-  const renderMessage = async (message: any) => {
-    if (!sharedKey) return message.encrypted;
-
-    try {
-      const decrypted = await Encryption.decryptMessage(
-        message.encrypted,
-        message.iv,
-        sharedKey
-      );
-      return decrypted;
-    } catch (error) {
-      console.error('Failed to decrypt message:', error);
-      return '[Encrypted Message]';
-    }
-  };
-
-  // 监听滚动到顶部
-  const handleScroll = async (e: React.UIEvent<HTMLDivElement>) => {
-    const { scrollTop } = e.currentTarget;
-    if (scrollTop === 0 && hasMore && !isLoadingMore) {
-      await loadMoreMessages();
-    }
-  };
-
-  // 加载更多消息
-  const loadMoreMessages = async () => {
-    if (!chatRoom?.processId || isLoadingMore) return;
-    
-    try {
-      setIsLoadingMore(true);
-      await loadMessages(currentPage + 1);
-      setCurrentPage(prev => prev + 1);
-    } catch (error) {
-      console.error('Failed to load more messages:', error);
-    } finally {
-      setIsLoadingMore(false);
-    }
-  };
-
-  // 定期刷新最新消息
-  useEffect(() => {
-    if (chatRoom?.processId) {
-      loadMessages(1);
-      const interval = setInterval(async () => {
-        try {
-          await loadMessages(1);
-        } catch (error) {
-          console.error('Failed to refresh messages:', error);
-          // 可以添加重试逻辑
-        }
-      }, 5000);
-      return () => clearInterval(interval);
-    }
-  }, [chatRoom?.processId]);
-
-  // 初始化视频通话
+  // 视频通话相关功能
   const initializeVideoCall = async () => {
     try {
       webrtcService.current = new WebRTCService();
-      
-      // 初始化本地流
       const stream = await webrtcService.current.initLocalStream();
       setLocalStream(stream);
-
-      // 初始化对等连接
+      
       await webrtcService.current.initConnection((stream) => {
         setRemoteStream(stream);
       });
-
-      // 处理ICE候选
-      webrtcService.current.onIceCandidate(async (candidate) => {
-        if (candidate && chatRoom?.processId) {
-          try {
-            await AOProcess.sendMessage(
-              'WebRTCSignal',
-              {
-                type: 'ice-candidate',
-                data: candidate
-              },
-              chatRoom.processId
-            );
-          } catch (error) {
-            console.error('Failed to send ICE candidate:', error);
-          }
-        }
-      });
-
-      // 创建并发送提议
-      const offer = await webrtcService.current.createOffer();
-      await AOProcess.sendMessage(
-        'WebRTCSignal',
-        {
-          type: 'offer',
-          data: offer
-        },
-        chatRoom.processId
-      );
-
-      // 显示当前使用的连接策略
-      setConnectionStrategy(webrtcService.current.getConnectionStrategy());
     } catch (error) {
-      console.error('Failed to initialize video call:', error);
-      // 可以添加用户提示
+      console.error('[Chat] Video call initialization failed:', error);
+      setError('Failed to initialize video call');
     }
   };
 
-  // 处理收到的WebRTC信令
-  const handleWebRTCSignal = async (signal: any) => {
-    if (!webrtcService.current) return;
-
-    try {
-      switch (signal.type) {
-        case 'offer':
-          const answer = await webrtcService.current.handleOffer(signal.data);
-          await AOProcess.sendMessage(
-            'WebRTCSignal',
-            {
-              type: 'answer',
-              data: answer
-            },
-            chatRoom.processId
-          );
-          break;
-
-        case 'answer':
-          await webrtcService.current.handleAnswer(signal.data);
-          break;
-
-        case 'ice-candidate':
-          await webrtcService.current.handleCandidate(signal.data);
-          break;
-      }
-    } catch (error) {
-      console.error('Error handling WebRTC signal:', error);
-    }
-  };
-
-  // 开始视频通话
-  const startVideoCall = async () => {
-    setIsVideoCallActive(true);
-    await initializeVideoCall();
-  };
-
-  // 结束视频通话
-  const endVideoCall = () => {
-    if (webrtcService.current) {
-      webrtcService.current.close();
-    }
-    setIsVideoCallActive(false);
-    setLocalStream(null);
-    setRemoteStream(null);
-  };
-
-  // 控制音频和视频
   const toggleAudio = () => {
     if (webrtcService.current) {
       const newState = !isAudioEnabled;
@@ -335,75 +199,6 @@ export default function ChatWindow({
     }
   };
 
-  // 添加聊天邀请处理UI
-  {chatInvitations.length > 0 && (
-    <div className="p-4 border-t border-gray-200">
-      <h3 className="font-semibold mb-2">Chat Invitations</h3>
-      {chatInvitations.map((invitation) => (
-        <div key={invitation.processId} className="mb-2 p-2 bg-gray-50 rounded">
-          <div className="text-sm">From: {invitation.fromNickname}</div>
-          <div className="flex gap-2 mt-2">
-            <button
-              onClick={() => handleAcceptChatInvitation(invitation)}
-              className="text-xs bg-green-500 text-white px-2 py-1 rounded"
-            >
-              Join Chat
-            </button>
-            <button
-              onClick={() => handleRejectChatInvitation(invitation)}
-              className="text-xs bg-red-500 text-white px-2 py-1 rounded"
-            >
-              Decline
-            </button>
-          </div>
-        </div>
-      ))}
-    </div>
-  )}
-
-  // 添加处理函数
-  const handleAcceptChatInvitation = async (invitation: ChatInvitation) => {
-    try {
-      const result = await AOProcess.acceptChatroom(invitation.processId);
-      if (result.success) {
-        await loadChatInvitations();
-      }
-    } catch (error) {
-      console.error('Failed to accept chat invitation:', error);
-    }
-  };
-
-  const handleRejectChatInvitation = async (invitation: ChatInvitation) => {
-    try {
-      const result = await AOProcess.rejectChatroom(invitation.processId);
-      if (result.success) {
-        await loadChatInvitations();
-      }
-    } catch (error) {
-      console.error('Failed to reject chat invitation:', error);
-    }
-  };
-
-  // 添加加载函数
-  const loadChatInvitations = async () => {
-    try {
-      const result = await AOProcess.getChatroomInvitations();
-      if (result.success) {
-        setChatInvitations(result.chatInvitations || []);
-      }
-    } catch (error) {
-      console.error('Failed to load chat invitations:', error);
-    }
-  };
-
-  // 添加聊天邀请加载的 useEffect
-  useEffect(() => {
-    loadChatInvitations();
-    const interval = setInterval(loadChatInvitations, 10000);
-    return () => clearInterval(interval);
-  }, []);
-
-  // 未选择联系人时的显示
   if (!selectedContact) {
     return (
       <div className="flex-1 flex items-center justify-center text-gray-500">
@@ -412,25 +207,19 @@ export default function ChatWindow({
     );
   }
 
-  // 未创建聊天室时的显示
-  if (!chatRoom) {
-    return (
-      <div className="flex-1 flex items-center justify-center text-gray-500">
-        Start a chat with {selectedContact.nickname}
-      </div>
-    );
-  }
-
   return (
     <div className="flex-1 flex flex-col">
-      {/* 聊天头部 */}
+      {/* Chat Header */}
       <div className="p-4 border-b border-gray-200 flex justify-between items-center">
         <div>
           <h2 className="font-semibold">{selectedContact.nickname}</h2>
           <div className="text-sm text-gray-500">{selectedContact.address}</div>
         </div>
         <button
-          onClick={() => setIsVideoCallActive(true)}
+          onClick={() => {
+            setIsVideoCallActive(true);
+            initializeVideoCall();
+          }}
           className="p-2 rounded-full hover:bg-gray-100"
         >
           <svg className="w-6 h-6 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -439,69 +228,52 @@ export default function ChatWindow({
         </button>
       </div>
 
-      {/* 聊天邀请部分 - 新添加 */}
-      {chatInvitations.length > 0 && (
-        <div className="p-4 border-b border-gray-200">
-          <h3 className="font-semibold mb-2">Chat Invitations</h3>
-          {chatInvitations.map((invitation) => (
-            <div key={invitation.processId} className="mb-2 p-2 bg-gray-50 rounded">
-              <div className="text-sm">From: {invitation.fromNickname}</div>
-              <div className="flex gap-2 mt-2">
-                <button
-                  onClick={() => handleAcceptChatInvitation(invitation)}
-                  className="text-xs bg-green-500 text-white px-2 py-1 rounded"
-                >
-                  Join Chat
-                </button>
-                <button
-                  onClick={() => handleRejectChatInvitation(invitation)}
-                  className="text-xs bg-red-500 text-white px-2 py-1 rounded"
-                >
-                  Decline
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* 消息列表 */}
-      <div 
-        ref={messageListRef}
-        className="flex-1 overflow-y-auto p-4"
-        onScroll={handleScroll}
-      >
-        {isLoadingMore && (
-          <div className="text-center py-2">
-            Loading more messages...
+      {/* Messages List */}
+      <div className="flex-1 overflow-y-auto p-4">
+        {isLoading ? (
+          <div className="flex items-center justify-center h-full">
+            <div className="text-gray-500">Loading messages...</div>
           </div>
-        )}
-        {messages.map((message, index) => (
-          <div
-            key={`${message.timestamp}-${index}`}
-            className={`mb-4 flex ${
-              message.sender === currentUserAddress ? 'justify-end' : 'justify-start'
-            }`}
-          >
+        ) : messages.length === 0 ? (
+          <div className="text-center text-gray-500 mt-8">
+            No messages yet
+          </div>
+        ) : (
+          messages.map((message, index) => (
             <div
-              className={`max-w-[70%] rounded-lg p-3 ${
-                message.sender === currentUserAddress
-                  ? 'bg-green-500 text-white'
-                  : 'bg-gray-100'
+              key={`${message.timestamp}-${index}`}
+              className={`mb-4 flex ${
+                message.sender === currentUserAddress ? 'justify-end' : 'justify-start'
               }`}
             >
-              <div className="text-sm">{renderMessage(message)}</div>
-              <div className="text-xs mt-1 opacity-75">
-                {new Date(message.timestamp * 1000).toLocaleTimeString()}
+              <div
+                className={`max-w-[70%] rounded-lg p-3 ${
+                  message.sender === currentUserAddress
+                    ? 'bg-green-500 text-white'
+                    : 'bg-gray-100'
+                }`}
+              >
+                <div className="text-sm">{message.content}</div>
+                <div className="text-xs mt-1 opacity-75">
+                  {new Date(message.timestamp * 1000).toLocaleTimeString()}
+                  {message.encrypted && ' 🔒'}
+                  {message.status === 'delivered' && ' ✓'}
+                  {message.status === 'read' && ' ✓✓'}
+                </div>
               </div>
             </div>
-          </div>
-        ))}
+          ))
+        )}
         <div ref={messagesEndRef} />
       </div>
 
-      {/* 消息输入框 */}
+      {/* Message Input */}
       <form onSubmit={handleSendMessage} className="p-4 border-t border-gray-200">
+        {error && (
+          <div className="mb-2 text-sm text-red-500">
+            {error}
+          </div>
+        )}
         <div className="flex gap-2">
           <input
             type="text"
@@ -520,24 +292,26 @@ export default function ChatWindow({
         </div>
       </form>
 
-      {/* 视频通话模态框 */}
+      {/* Video Call Modal */}
       <VideoCallModal
         isOpen={isVideoCallActive}
-        onClose={() => setIsVideoCallActive(false)}
-        contact={selectedContact!}
+        onClose={() => {
+          setIsVideoCallActive(false);
+          if (webrtcService.current) {
+            webrtcService.current.close();
+          }
+          setLocalStream(null);
+          setRemoteStream(null);
+        }}
+        contact={selectedContact}
         isCaller={true}
         localStream={localStream}
         remoteStream={remoteStream}
-        onToggleAudio={() => setIsAudioEnabled(!isAudioEnabled)}
-        onToggleVideo={() => setIsVideoEnabled(!isVideoEnabled)}
+        onToggleAudio={toggleAudio}
+        onToggleVideo={toggleVideo}
         isAudioEnabled={isAudioEnabled}
         isVideoEnabled={isVideoEnabled}
       />
-
-      {/* 连接状态 */}
-      <div className="text-sm text-gray-400 mt-2">
-        Connection: {connectionStrategy}
-      </div>
     </div>
   );
 } 

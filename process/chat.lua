@@ -226,12 +226,29 @@ Handlers.add(
   "DebugState",
   Handlers.utils.hasMatchingTag("Action", "DebugState"),
   function(msg)
-    return encode({
+    return ao.json.encode({
       success = true,
       state = {
-        chatInvitations = State.chatInvitations,
-        chatrooms = State.chatrooms
+        initialized = true,
+        contacts = State.contacts,
+        invitations = State.invitations
       }
+    })
+  end
+)
+
+-- 确保所有处理器都返回正确格式的JSON
+Handlers.add(
+  "GetContacts",
+  Handlers.utils.hasMatchingTag("Action", "GetContacts"),
+  function(msg)
+    local address = msg.From
+    local contacts = State.contacts[address] or {}
+
+    -- 确保返回正确的JSON格式
+    return ao.json.encode({
+      success = true,
+      contacts = contacts
     })
   end
 ) 
