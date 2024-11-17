@@ -1,15 +1,9 @@
-import { spawn } from "@permaweb/aoconnect";
 import { createDataItemSigner, connect } from '@permaweb/ao-sdk';
 import { ProcessResult } from '@/types/ao';
 import { getConfig } from '@/config';
 
 const config = getConfig();
 const PROCESS_ID = config.ao.processId;
-
-// 保留这些常量，但现在spawn功能已废弃
-const CHATROOM_MODULE_TXID = "YOUR_MODULE_TX_ID";
-const SCHEDULER_ADDRESS = "_GQ33BkPtZrqxA84vM8Zk-N2aO0toNNu_C-l-rawrBA";
-const MU_ADDRESS = "fcoN_xJeisVsPXA-trzVAuIiqO3ydLQxM-L4XbrQKzY";
 
 const client = connect({
   MU_URL: config.ao.endpoints.MU_URL,
@@ -58,11 +52,8 @@ export class AOProcess {
 
         console.log(`[AO] Raw response:`, result);
 
-        // 处理AO的标准输出格式
         if (result && typeof result === 'object') {
-          // 检查是否有Output对象
           if ('Output' in result) {
-            // 如果Output是字符串，直接尝试解析
             if (typeof result.Output === 'string') {
               try {
                 return JSON.parse(result.Output);
@@ -70,17 +61,14 @@ export class AOProcess {
                 console.error('[AO] Failed to parse Output string:', error);
               }
             }
-            // 如果Output是对象且有data字段
             else if (result.Output && typeof result.Output === 'object') {
               if ('data' in result.Output) {
                 try {
-                  // 如果data是字符串，尝试解析
                   if (typeof result.Output.data === 'string') {
                     const parsedData = JSON.parse(result.Output.data);
                     console.log('[AO] Parsed Output.data:', parsedData);
                     return parsedData;
                   }
-                  // 如果data已经是对象，直接返回
                   else if (typeof result.Output.data === 'object') {
                     return result.Output.data;
                   }
@@ -88,19 +76,16 @@ export class AOProcess {
                   console.error('[AO] Failed to parse Output.data:', error);
                 }
               }
-              // 如果Output对象本身有所需的字段，直接返回
               if ('success' in result.Output) {
                 return result.Output;
               }
             }
           }
-          // 如果结果本身有所需的字段，直接返回
           if ('success' in result) {
             return result;
           }
         }
 
-        // 如果无法解析为标准格式，返回原始数据
         return {
           success: true,
           data: result
@@ -121,25 +106,37 @@ export class AOProcess {
     };
   }
 
-  // 联系人相关方法
-  static async sendInvitation(
-    address: string,
-    nickname: string
+  // 用户管理
+  static async addUser(
+    name: string,
+    avatar: string = ""
   ): Promise<ProcessResult> {
     try {
-      // 获取当前用户地址
-      const from = await window.arweaveWallet.getActiveAddress();
-      
-      console.log('[AO] Sending invitation:', { 
-        to: address, 
-        from,
-        fromNickname: nickname 
-      });
-      
       const data = {
-        to: address,
-        from: from,              // 添加发送者地址
-        fromNickname: nickname,  // 修改字段名
+        name,
+        avatar,
+        timestamp: Math.floor(Date.now() / 1000)
+      };
+
+      const result = await this.sendMessageWithRetry('AddUser', data);
+      console.log('[AO] Add user result:', result);
+
+      return result;
+    } catch (error) {
+      console.error('[AO] Add user error:', error);
+      throw error;
+    }
+  }
+
+  // 联系人管理
+  static async sendInvitation(
+    toAddress: string,
+    fromNickname: string
+  ): Promise<ProcessResult> {
+    try {
+      const data = {
+        to: toAddress,
+        fromNickname,
         timestamp: Math.floor(Date.now() / 1000)
       };
 
@@ -154,12 +151,12 @@ export class AOProcess {
   }
 
   static async acceptInvitation(
-    from: string,
+    fromAddress: string,
     nickname: string
   ): Promise<ProcessResult> {
     try {
       const data = {
-        from,
+        from: fromAddress,
         nickname,
         timestamp: Math.floor(Date.now() / 1000)
       };
@@ -174,7 +171,19 @@ export class AOProcess {
     }
   }
 
-  // 消息相关方法
+  static async getPendingInvitations(): Promise<ProcessResult> {
+    try {
+      const result = await this.sendMessageWithRetry('GetPendingInvitations');
+      console.log('[AO] Get pending invitations result:', result);
+
+      return result;
+    } catch (error) {
+      console.error('[AO] Get pending invitations error:', error);
+      throw error;
+    }
+  }
+
+  // 消息管理
   static async sendMessage(
     receiver: string,
     content: string,
@@ -238,7 +247,7 @@ export class AOProcess {
     }
   }
 
-  // 获取联系人和邀请
+  // 联系人查询
   static async getContacts(): Promise<ProcessResult> {
     try {
       const result = await this.sendMessageWithRetry('GetContacts');
@@ -250,16 +259,40 @@ export class AOProcess {
       throw error;
     }
   }
+}
 
-  static async getPendingInvitations(): Promise<ProcessResult> {
-    try {
-      const result = await this.sendMessageWithRetry('GetPendingInvitations');
-      console.log('[AO] Get pending invitations result:', result);
+// 类型定义
+export interface User {
+  name: string;
+  avatar?: string;
+  timestamp: number;
+  status: 'active' | 'offline';
+}
 
-      return result;
-    } catch (error) {
-      console.error('[AO] Get pending invitations error:', error);
-      throw error;
-    }
-  }
-} 
+export interface Contact {
+  nickname: string;
+  timestamp: number;
+  status: 'active' | 'blocked';
+}
+
+export interface Message {
+  id: string;
+  sender: string;
+  content: string;
+  timestamp: number;
+  status: 'sent' | 'delivered' | 'read';
+  encrypted?: boolean;
+}
+
+export interface Invitation {
+  fromNickname: string;
+  timestamp: number;
+  status: 'pending' | 'accepted' | 'rejected';
+}
+
+export interface ChatSession {
+  messages: Message[];
+  last_read: {
+    [address: string]: string;
+  };
+}

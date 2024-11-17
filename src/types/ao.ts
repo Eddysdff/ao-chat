@@ -13,14 +13,10 @@ export interface ContactInvitation {
   timestamp: number;
 }
 
-export interface ProcessResult {
+export interface ProcessResult<T = any> {
   success: boolean;
+  data?: T;
   error?: string;
-  data?: any;
-  contacts?: Contact[];
-  invitations?: ContactInvitation[];
-  messages?: ChatMessage[];
-  session?: ChatSession;
 }
 
 export interface ChatMessage {
