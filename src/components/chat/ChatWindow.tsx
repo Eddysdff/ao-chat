@@ -29,18 +29,27 @@ export default function ChatWindow({
   const [sharedKey, setSharedKey] = useState<CryptoKey | null>(null);
   const webrtcService = useRef<WebRTCService | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const lastInteractionRef = useRef(Date.now());
 
   // 滚动到最新消息
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
+  // 更新最后交互时间
+  const updateLastInteraction = () => {
+    lastInteractionRef.current = Date.now();
+  };
+
   // 加载消息历史
-  const loadMessages = async () => {
+  const loadMessages = async (retryCount = 0) => {
     if (!selectedContact) return;
 
     try {
-      setIsLoading(true);
+      if (retryCount === 0) {
+        setIsLoading(true);
+      }
+
       const result = await AOProcess.getMessages(selectedContact.address);
       
       if (result.success && result.messages) {
@@ -63,16 +72,26 @@ export default function ChatWindow({
           })
         );
         
-        setMessages(decryptedMessages);
-        scrollToBottom();
+        // 只在消息有变化时更新状态
+        const hasNewMessages = JSON.stringify(messages) !== JSON.stringify(decryptedMessages);
+        if (hasNewMessages) {
+          setMessages(decryptedMessages);
+          scrollToBottom();
+        }
       }
       
       setError(null);
     } catch (error) {
       console.error('[Chat] Load messages failed:', error);
+      if (error instanceof Error && error.message.includes('network') && retryCount < 3) {
+        setTimeout(() => loadMessages(retryCount + 1), 1000 * Math.pow(2, retryCount));
+        return;
+      }
       setError('Failed to load messages');
     } finally {
-      setIsLoading(false);
+      if (retryCount === 0) {
+        setIsLoading(false);
+      }
     }
   };
 
@@ -116,17 +135,31 @@ export default function ChatWindow({
     let mounted = true;
     let interval: NodeJS.Timeout;
 
+    // 添加用户交互监听
+    window.addEventListener('mousemove', updateLastInteraction);
+    window.addEventListener('keydown', updateLastInteraction);
+    window.addEventListener('click', updateLastInteraction);
+
     const refreshMessages = async () => {
       if (!mounted) return;
-      await loadMessages();
+      
+      // 只在用户最近5分钟有交互时刷新
+      const isActive = Date.now() - lastInteractionRef.current < 5 * 60 * 1000;
+      if (isActive) {
+        await loadMessages();
+      }
     };
 
     refreshMessages();
-    interval = setInterval(refreshMessages, 5000);
+    // 增加轮询间隔到15秒
+    interval = setInterval(refreshMessages, 15000);
 
     return () => {
       mounted = false;
       clearInterval(interval);
+      window.removeEventListener('mousemove', updateLastInteraction);
+      window.removeEventListener('keydown', updateLastInteraction);
+      window.removeEventListener('click', updateLastInteraction);
     };
   }, [selectedContact]);
 
@@ -157,6 +190,7 @@ export default function ChatWindow({
 
       if (result.success) {
         setNewMessage('');
+        updateLastInteraction(); // 更新最后交互时间
         await loadMessages();
       } else {
         throw new Error(result.error || 'Failed to send message');

@@ -1,3 +1,5 @@
+import { AOProcess } from './ao-process';
+
 export async function getActiveAddress(): Promise<string> {
   if (!window.arweaveWallet) {
     throw new Error('ArConnect not found');
@@ -12,7 +14,12 @@ export class ArConnectService {
   static async connectWallet(): Promise<string> {
     try {
       await this.initialize();
-      return await this.getAddress();
+      const address = await this.getAddress();
+      
+      // 连接时发送一次 AddUser
+      await AOProcess.addUser(`User_${address.slice(0, 6)}`);
+      
+      return address;
     } catch (error) {
       console.error('[ArConnect] Connection failed:', error);
       throw error;

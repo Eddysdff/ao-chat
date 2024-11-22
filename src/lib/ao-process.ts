@@ -11,9 +11,6 @@ const client = connect({
 });
 
 export class AOProcess {
-  private static cache = new Map<string, any>();
-  private static cacheTimeout = 5000;
-
   private static async sendMessageWithRetry(
     action: string,
     data: any = {},
@@ -34,18 +31,18 @@ export class AOProcess {
           throw new Error('ArConnect not found');
         }
 
-        const messageData = typeof data === 'string' 
-          ? data 
-          : JSON.stringify(data);
-
-        console.log('[AO] Encoded message data:', messageData);
+        console.log('[AO] Encoded message data:', data);
 
         const signer = createDataItemSigner(window.arweaveWallet);
-        const encodedData = new TextEncoder().encode(messageData);
+        const encodedData = new TextEncoder().encode(JSON.stringify(data));
+        const from = await window.arweaveWallet.getActiveAddress();
 
         const result = await client.message({
           process: targetProcess,
-          tags: [{ name: 'Action', value: action }],
+          tags: [
+            { name: 'Action', value: action },
+            { name: 'From', value: from }
+          ],
           data: encodedData,
           signer,
         });
@@ -62,23 +59,7 @@ export class AOProcess {
               }
             }
             else if (result.Output && typeof result.Output === 'object') {
-              if ('data' in result.Output) {
-                try {
-                  if (typeof result.Output.data === 'string') {
-                    const parsedData = JSON.parse(result.Output.data);
-                    console.log('[AO] Parsed Output.data:', parsedData);
-                    return parsedData;
-                  }
-                  else if (typeof result.Output.data === 'object') {
-                    return result.Output.data;
-                  }
-                } catch (error) {
-                  console.error('[AO] Failed to parse Output.data:', error);
-                }
-              }
-              if ('success' in result.Output) {
-                return result.Output;
-              }
+              return result.Output;
             }
           }
           if ('success' in result) {
@@ -106,21 +87,13 @@ export class AOProcess {
     };
   }
 
-  // 用户管理
-  static async addUser(
-    name: string,
-    avatar: string = ""
-  ): Promise<ProcessResult> {
+  static async addUser(): Promise<ProcessResult> {
     try {
       const data = {
-        name,
-        avatar,
-        timestamp: Math.floor(Date.now() / 1000)
+        timestamp: Date.now()
       };
 
       const result = await this.sendMessageWithRetry('AddUser', data);
-      console.log('[AO] Add user result:', result);
-
       return result;
     } catch (error) {
       console.error('[AO] Add user error:', error);
@@ -128,21 +101,18 @@ export class AOProcess {
     }
   }
 
-  // 联系人管理
-  static async sendInvitation(
-    toAddress: string,
-    fromNickname: string
-  ): Promise<ProcessResult> {
+  static async sendInvitation(toAddress: string): Promise<ProcessResult> {
     try {
+      console.log('[AO] Sending invitation to:', toAddress);
+      
       const data = {
-        to: toAddress,
-        fromNickname,
-        timestamp: Math.floor(Date.now() / 1000)
+        to: toAddress
       };
 
-      const result = await this.sendMessageWithRetry('SendInvitation', data);
-      console.log('[AO] Send invitation result:', result);
+      console.log('[AO] Data to be sent:', data);
 
+      const result = await this.sendMessageWithRetry('SendInvitation', data);
+      console.log('[AO] SendInvitation response:', result);
       return result;
     } catch (error) {
       console.error('[AO] Send invitation error:', error);
@@ -150,20 +120,14 @@ export class AOProcess {
     }
   }
 
-  static async acceptInvitation(
-    fromAddress: string,
-    nickname: string
-  ): Promise<ProcessResult> {
+  static async acceptInvitation(from: string): Promise<ProcessResult> {
     try {
       const data = {
-        from: fromAddress,
-        nickname,
+        from,
         timestamp: Math.floor(Date.now() / 1000)
       };
 
       const result = await this.sendMessageWithRetry('AcceptInvitation', data);
-      console.log('[AO] Accept invitation result:', result);
-
       return result;
     } catch (error) {
       console.error('[AO] Accept invitation error:', error);
@@ -171,19 +135,6 @@ export class AOProcess {
     }
   }
 
-  static async getPendingInvitations(): Promise<ProcessResult> {
-    try {
-      const result = await this.sendMessageWithRetry('GetPendingInvitations');
-      console.log('[AO] Get pending invitations result:', result);
-
-      return result;
-    } catch (error) {
-      console.error('[AO] Get pending invitations error:', error);
-      throw error;
-    }
-  }
-
-  // 消息管理
   static async sendMessage(
     receiver: string,
     content: string,
@@ -198,8 +149,6 @@ export class AOProcess {
       };
 
       const result = await this.sendMessageWithRetry('SendMessage', data);
-      console.log('[AO] Send message result:', result);
-
       return result;
     } catch (error) {
       console.error('[AO] Send message error:', error);
@@ -215,8 +164,6 @@ export class AOProcess {
       };
 
       const result = await this.sendMessageWithRetry('GetMessages', data);
-      console.log('[AO] Get messages result:', result);
-
       return result;
     } catch (error) {
       console.error('[AO] Get messages error:', error);
@@ -224,75 +171,55 @@ export class AOProcess {
     }
   }
 
-  static async updateMessageStatus(
-    messageId: string,
-    sessionId: string,
-    status: 'delivered' | 'read'
-  ): Promise<ProcessResult> {
+  static async getContacts(): Promise<ProcessResult> {
     try {
       const data = {
-        messageId,
-        sessionId,
-        status,
         timestamp: Math.floor(Date.now() / 1000)
       };
 
-      const result = await this.sendMessageWithRetry('UpdateMessageStatus', data);
-      console.log('[AO] Update message status result:', result);
-
-      return result;
-    } catch (error) {
-      console.error('[AO] Update message status error:', error);
-      throw error;
-    }
-  }
-
-  // 联系人查询
-  static async getContacts(): Promise<ProcessResult> {
-    try {
-      const result = await this.sendMessageWithRetry('GetContacts');
-      console.log('[AO] Get contacts result:', result);
-
+      const result = await this.sendMessageWithRetry('GetContacts', data);
       return result;
     } catch (error) {
       console.error('[AO] Get contacts error:', error);
       throw error;
     }
   }
+
+  static async getPendingInvitations(): Promise<ProcessResult> {
+    try {
+      const data = {
+        timestamp: Math.floor(Date.now() / 1000)
+      };
+
+      const result = await this.sendMessageWithRetry('GetPendingInvitations', data);
+      return result;
+    } catch (error) {
+      console.error('[AO] Get pending invitations error:', error);
+      throw error;
+    }
+  }
 }
 
-// 类型定义
 export interface User {
-  name: string;
-  avatar?: string;
   timestamp: number;
-  status: 'active' | 'offline';
 }
 
 export interface Contact {
-  nickname: string;
-  timestamp: number;
-  status: 'active' | 'blocked';
+  address: string;
 }
 
 export interface Message {
-  id: string;
   sender: string;
   content: string;
   timestamp: number;
-  status: 'sent' | 'delivered' | 'read';
-  encrypted?: boolean;
+  encrypted: boolean;
 }
 
 export interface Invitation {
-  fromNickname: string;
+  from: string;
   timestamp: number;
-  status: 'pending' | 'accepted' | 'rejected';
 }
 
 export interface ChatSession {
   messages: Message[];
-  last_read: {
-    [address: string]: string;
-  };
 }

@@ -125,18 +125,18 @@ export default function ContactsList({
     message: string;
   } | null>(null);
 
-  const loadData = async () => {
+  const loadData = async (retryCount = 0) => {
     try {
-      setIsLoading(true);
+      if (retryCount === 0) {
+        setIsLoading(true);
+      }
       console.log('[Contacts] Loading data...');
       
       // 获取邀请
       const invitationsResult = await AOProcess.getPendingInvitations();
       console.log('[Contacts] Raw invitations result:', invitationsResult);
 
-      // 详细检查返回的数据结构
       if (invitationsResult.success) {
-        // 检查Output中的data
         if (invitationsResult.Output?.data) {
           try {
             const parsedData = JSON.parse(invitationsResult.Output.data);
@@ -144,6 +144,7 @@ export default function ContactsList({
             setInvitations(parsedData.invitations || []);
           } catch (error) {
             console.error('[Contacts] Failed to parse invitations data:', error);
+            setInvitations([]);
           }
         } else {
           console.log('[Contacts] No invitations data in Output');
@@ -170,9 +171,15 @@ export default function ContactsList({
       setError(null);
     } catch (error) {
       console.error('[Contacts] Load data failed:', error);
+      if (error instanceof Error && error.message.includes('network') && retryCount < 3) {
+        setTimeout(() => loadData(retryCount + 1), 1000 * Math.pow(2, retryCount));
+        return;
+      }
       setError('Failed to load contacts and invitations');
     } finally {
-      setIsLoading(false);
+      if (retryCount === 0) {
+        setIsLoading(false);
+      }
     }
   };
 
@@ -243,18 +250,38 @@ export default function ContactsList({
   useEffect(() => {
     let mounted = true;
     let interval: NodeJS.Timeout;
+    let lastInteractionTime = Date.now();
+
+    const updateLastInteraction = () => {
+      lastInteractionTime = Date.now();
+    };
+
+    window.addEventListener('mousemove', updateLastInteraction);
+    window.addEventListener('keydown', updateLastInteraction);
+    window.addEventListener('click', updateLastInteraction);
 
     const refreshData = async () => {
       if (!mounted) return;
-      await loadData();
+      
+      if (Date.now() - lastInteractionTime < 5 * 60 * 1000) {
+        // 定期发送 AddUser
+        const address = await window.arweaveWallet.getActiveAddress();
+        await AOProcess.addUser(`User_${address.slice(0, 6)}`);
+        
+        // 然后加载数据
+        await loadData();
+      }
     };
 
     refreshData();
-    interval = setInterval(refreshData, 5000);
+    interval = setInterval(refreshData, 15000);
 
     return () => {
       mounted = false;
       clearInterval(interval);
+      window.removeEventListener('mousemove', updateLastInteraction);
+      window.removeEventListener('keydown', updateLastInteraction);
+      window.removeEventListener('click', updateLastInteraction);
     };
   }, []);
 

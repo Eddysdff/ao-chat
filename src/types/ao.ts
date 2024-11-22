@@ -1,46 +1,54 @@
-export interface Contact {
-  address: string;
-  nickname: string;
-  status: 'online' | 'offline';
-  lastSeen?: number;
-}
-
-export interface ContactInvitation {
-  from: string;
-  fromNickname: string;
-  to: string;
-  status: 'pending' | 'accepted' | 'rejected';
-  timestamp: number;
-}
-
 export interface ProcessResult<T = any> {
   success: boolean;
   data?: T;
   error?: string;
 }
 
-export interface ChatMessage {
+export interface User {
+  name: string;
+  avatar?: string;
+  timestamp: number;
+  status: 'active' | 'offline';
+}
+
+export interface Contact {
+  address: string;
+  nickname: string;
+  name: string;
+  avatar?: string;
+  status: 'active' | 'blocked';
+  unread: number;
+}
+
+export interface Message {
   id: string;
   sender: string;
-  receiver: string;
   content: string;
   timestamp: number;
   status: 'sent' | 'delivered' | 'read';
   encrypted?: boolean;
 }
 
+export interface Invitation {
+  from: string;
+  fromNickname: string;
+  name: string;
+  avatar?: string;
+  timestamp: number;
+}
+
 export interface ChatSession {
   participants: [string, string];
-  lastMessage?: ChatMessage;
+  lastMessage?: Message;
   unreadCount?: number;
   lastActivity: number;
 }
 
 export interface ChatState {
   contacts: { [address: string]: Contact };
-  invitations: { [address: string]: ContactInvitation[] };
+  invitations: { [address: string]: Invitation[] };
   sessions: { [sessionId: string]: ChatSession };
-  messages: { [sessionId: string]: ChatMessage[] };
+  messages: { [sessionId: string]: Message[] };
 }
 
 export interface UserStatus {
