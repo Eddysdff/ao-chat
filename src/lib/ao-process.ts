@@ -11,9 +11,15 @@ const client = connect({
 });
 
 export class AOProcess {
+  private static prepareData(data: any): Uint8Array {
+    const dataString = JSON.stringify(data);
+    const encoder = new TextEncoder();
+    return encoder.encode(dataString);
+  }
+
   private static async sendMessageWithRetry(
     action: string,
-    data: any = {},
+    data: any,
     targetProcess: string = PROCESS_ID,
     maxRetries: number = 3
   ): Promise<ProcessResult> {
@@ -21,9 +27,12 @@ export class AOProcess {
     
     for (let i = 0; i < maxRetries; i++) {
       try {
+        const encodedData = this.prepareData(data);
+        
         console.log(`[AO] Sending message attempt ${i + 1}:`, {
           action,
-          data,
+          rawData: data,
+          encodedData,
           targetProcess
         });
 
@@ -31,17 +40,13 @@ export class AOProcess {
           throw new Error('ArConnect not found');
         }
 
-        console.log('[AO] Encoded message data:', data);
-
         const signer = createDataItemSigner(window.arweaveWallet);
-        const encodedData = new TextEncoder().encode(JSON.stringify(data));
-        const from = await window.arweaveWallet.getActiveAddress();
 
         const result = await client.message({
           process: targetProcess,
           tags: [
             { name: 'Action', value: action },
-            { name: 'From', value: from }
+            { name: 'Content-Type', value: 'application/json' }
           ],
           data: encodedData,
           signer,
@@ -56,11 +61,10 @@ export class AOProcess {
                 return JSON.parse(result.Output);
               } catch (error) {
                 console.error('[AO] Failed to parse Output string:', error);
+                return result.Output;
               }
             }
-            else if (result.Output && typeof result.Output === 'object') {
-              return result.Output;
-            }
+            return result.Output;
           }
           if ('success' in result) {
             return result;
@@ -73,8 +77,17 @@ export class AOProcess {
         };
 
       } catch (error) {
-        console.warn(`[AO] Attempt ${i + 1} failed:`, error);
+        console.error(`[AO] Attempt ${i + 1} failed:`, error);
         lastError = error;
+        
+        if (error instanceof Error) {
+          console.error('[AO] Error details:', {
+            name: error.name,
+            message: error.message,
+            stack: error.stack
+          });
+        }
+        
         if (i < maxRetries - 1) {
           await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, i)));
         }
@@ -93,8 +106,7 @@ export class AOProcess {
         timestamp: Date.now()
       };
 
-      const result = await this.sendMessageWithRetry('AddUser', data);
-      return result;
+      return await this.sendMessageWithRetry('AddUser', data);
     } catch (error) {
       console.error('[AO] Add user error:', error);
       throw error;
@@ -103,17 +115,12 @@ export class AOProcess {
 
   static async sendInvitation(toAddress: string): Promise<ProcessResult> {
     try {
-      console.log('[AO] Sending invitation to:', toAddress);
-      
       const data = {
         to: toAddress
       };
-
-      console.log('[AO] Data to be sent:', data);
-
-      const result = await this.sendMessageWithRetry('SendInvitation', data);
-      console.log('[AO] SendInvitation response:', result);
-      return result;
+      
+      console.log('[AO] Sending invitation data:', data);
+      return await this.sendMessageWithRetry('SendInvitation', data);
     } catch (error) {
       console.error('[AO] Send invitation error:', error);
       throw error;
@@ -127,8 +134,7 @@ export class AOProcess {
         timestamp: Math.floor(Date.now() / 1000)
       };
 
-      const result = await this.sendMessageWithRetry('AcceptInvitation', data);
-      return result;
+      return await this.sendMessageWithRetry('AcceptInvitation', data);
     } catch (error) {
       console.error('[AO] Accept invitation error:', error);
       throw error;
@@ -148,8 +154,7 @@ export class AOProcess {
         timestamp: Math.floor(Date.now() / 1000)
       };
 
-      const result = await this.sendMessageWithRetry('SendMessage', data);
-      return result;
+      return await this.sendMessageWithRetry('SendMessage', data);
     } catch (error) {
       console.error('[AO] Send message error:', error);
       throw error;
@@ -163,8 +168,7 @@ export class AOProcess {
         timestamp: Math.floor(Date.now() / 1000)
       };
 
-      const result = await this.sendMessageWithRetry('GetMessages', data);
-      return result;
+      return await this.sendMessageWithRetry('GetMessages', data);
     } catch (error) {
       console.error('[AO] Get messages error:', error);
       throw error;
@@ -177,8 +181,7 @@ export class AOProcess {
         timestamp: Math.floor(Date.now() / 1000)
       };
 
-      const result = await this.sendMessageWithRetry('GetContacts', data);
-      return result;
+      return await this.sendMessageWithRetry('GetContacts', data);
     } catch (error) {
       console.error('[AO] Get contacts error:', error);
       throw error;
@@ -191,8 +194,7 @@ export class AOProcess {
         timestamp: Math.floor(Date.now() / 1000)
       };
 
-      const result = await this.sendMessageWithRetry('GetPendingInvitations', data);
-      return result;
+      return await this.sendMessageWithRetry('GetPendingInvitations', data);
     } catch (error) {
       console.error('[AO] Get pending invitations error:', error);
       throw error;

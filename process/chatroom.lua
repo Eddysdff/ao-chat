@@ -125,27 +125,48 @@ Handlers.add(
   "SendInvitation",
   Handlers.utils.hasMatchingTag("Action", "SendInvitation"),
   function(msg)
-    print("[Debug] SendInvitation called")
+    -- 添加详细的调试日志
+    ao.send({
+      Target = ao.id,
+      Action = "Debug",
+      Data = {
+        handler = "SendInvitation",
+        msg = msg,
+        msg_from = msg.From,
+        msg_data = msg.Data,
+        msg_tags = msg.Tags
+      }
+    })
+
     local from = msg.From
-    local data = msg.Data
+    local data = Handlers.utils.parseData(msg.Data)  -- 确保正确解析数据
     
     -- 验证发送者地址
-    if not from then
-      return Handlers.utils.createResponse(false, nil, "Invalid sender address")
+    if not from or not Handlers.utils.userExists(from) then
+      return Handlers.utils.createResponse(false, nil, "Invalid or unregistered sender")
     end
     
-    -- 获取接收者地址
-    local to
-    if type(data) == "table" and data.to then
-      to = data.to
-    end
-    
-    -- 验证接收者地址
-    if not to then
+    -- 获取接收者地址并验证
+    local to = data and data.to
+    if not to or not Handlers.utils.validateAddress(to) then
       return Handlers.utils.createResponse(false, nil, "Invalid recipient address")
     end
 
-    print("[Debug] From:", from, "To:", to)
+    -- 验证接收者是否已注册
+    if not Handlers.utils.userExists(to) then
+      return Handlers.utils.createResponse(false, nil, "Recipient not registered")
+    end
+
+    -- 检查是否已经是联系人
+    if Handlers.utils.areContacts(from, to) then
+      return Handlers.utils.createResponse(false, nil, "Already contacts")
+    end
+
+    -- 检查是否已经有待处理的邀请
+    if State.invitations[to] and State.invitations[to][from] and 
+       State.invitations[to][from].status == "pending" then
+      return Handlers.utils.createResponse(false, nil, "Invitation already sent")
+    end
 
     -- 初始化邀请表
     if not State.invitations[to] then
