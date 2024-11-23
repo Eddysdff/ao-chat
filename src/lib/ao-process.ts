@@ -5,6 +5,9 @@ import { getConfig } from '@/config';
 const config = getConfig();
 const PROCESS_ID = config.ao.processId;
 
+// 定义需要等待响应的操作
+const ACTIONS_NEED_RESPONSE = ['GetPendingInvitations', 'GetContacts', 'GetMessages'];
+
 const client = connect({
   MU_URL: config.ao.endpoints.MU_URL,
   CU_URL: config.ao.endpoints.CU_URL,
@@ -15,6 +18,47 @@ export class AOProcess {
     const dataString = JSON.stringify(data);
     const encoder = new TextEncoder();
     return encoder.encode(dataString);
+  }
+
+  private static async waitForResponse(requestId: string, action: string, timeout: number = 10000): Promise<ProcessResult> {
+    return new Promise((resolve, reject) => {
+      let timeoutId: NodeJS.Timeout;
+      
+      const messageHandler = (event: any) => {
+        if (!event.messages) return;
+        
+        for (const message of event.messages) {
+          // 检查是否是对应的响应消息
+          const isMatchingResponse = message.Tags?.some(tag => 
+            tag.name === 'Action' && tag.value === `${action}Result`
+          );
+
+          if (isMatchingResponse && message.Data) {
+            console.log(`[AO] Found ${action} response:`, message);
+            clearTimeout(timeoutId);
+            window.removeEventListener('ao-messages', messageHandler);
+            
+            try {
+              const data = typeof message.Data === 'string' 
+                ? JSON.parse(message.Data) 
+                : message.Data;
+              resolve(data);
+            } catch (error) {
+              console.error('[AO] Error parsing response data:', error);
+              resolve(message.Data);
+            }
+            return;
+          }
+        }
+      };
+
+      window.addEventListener('ao-messages', messageHandler);
+
+      timeoutId = setTimeout(() => {
+        window.removeEventListener('ao-messages', messageHandler);
+        reject(new Error('Response timeout'));
+      }, timeout);
+    });
   }
 
   private static async sendMessageWithRetry(
@@ -28,11 +72,11 @@ export class AOProcess {
     for (let i = 0; i < maxRetries; i++) {
       try {
         const encodedData = this.prepareData(data);
+        const requestId = crypto.randomUUID();
         
-        console.log(`[AO] Sending message attempt ${i + 1}:`, {
-          action,
-          data,
-          targetProcess
+        console.log(`[AO] Sending ${action} request:`, {
+          requestId,
+          data
         });
 
         if (!window.arweaveWallet) {
@@ -41,66 +85,43 @@ export class AOProcess {
 
         const signer = createDataItemSigner(window.arweaveWallet);
 
+        // 发送请求
         const result = await client.message({
           process: targetProcess,
           tags: [
             { name: 'Action', value: action },
-            { name: 'Content-Type', value: 'application/json' }
+            { name: 'Content-Type', value: 'application/json' },
+            { name: 'Reference', value: requestId }
           ],
           data: encodedData,
           signer,
         });
 
-        console.log('[AO] Initial response (message ID):', result);
+        console.log(`[AO] ${action} request sent:`, result);
 
-        if (result && result.data) {
-          await new Promise(resolve => setTimeout(resolve, 3000));
-
-          const messageResult = await client.message({
-            process: targetProcess,
-            tags: [
-              { name: 'Action', value: 'GetResults' },
-              { name: 'Input', value: result.data }
-            ],
-            data: new Uint8Array(),
-            signer,
-          });
-
-          console.log('[AO] Message result:', messageResult);
-
-          if (messageResult && Array.isArray(messageResult.Messages)) {
-            for (const message of messageResult.Messages) {
-              const isDebugMessage = message.Tags?.some(tag => 
-                tag.name === 'Action' && tag.value === 'Debug'
-              );
-
-              if (isDebugMessage && message.Data) {
-                console.log('[AO] Found debug message:', message.Data);
-                
-                if (message.Data.handler === action && message.Data.result) {
-                  return message.Data.result;
-                }
-              }
+        // 只有需要等待响应的操作才等待
+        if (ACTIONS_NEED_RESPONSE.includes(action)) {
+          try {
+            const response = await this.waitForResponse(requestId, action);
+            console.log(`[AO] ${action} response received:`, response);
+            return response;
+          } catch (error) {
+            if (error.message === 'Response timeout' && i < maxRetries - 1) {
+              console.log(`[AO] ${action} response timeout, retrying...`);
+              continue;
             }
-
-            const lastMessage = messageResult.Messages[messageResult.Messages.length - 1];
-            if (lastMessage && lastMessage.Data) {
-              return {
-                success: true,
-                data: lastMessage.Data
-              };
-            }
+            throw error;
           }
+        } else {
+          // 写入操作直接返回发送结果
+          return {
+            success: true,
+            data: result.data
+          };
         }
 
-        console.log('[AO] No valid response found');
-        return {
-          success: false,
-          error: 'No valid response found'
-        };
-
       } catch (error) {
-        console.error(`[AO] Attempt ${i + 1} failed:`, error);
+        console.error(`[AO] ${action} attempt ${i + 1} failed:`, error);
         lastError = error;
         if (i < maxRetries - 1) {
           await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, i)));
@@ -210,17 +231,13 @@ export class AOProcess {
 
       console.log('[AO] Getting pending invitations...');
       const result = await this.sendMessageWithRetry('GetPendingInvitations', data);
-      console.log('[AO] GetPendingInvitations complete result:', result);
+      console.log('[AO] GetPendingInvitations result:', result);
 
       if (result.success && result.data) {
-        if (result.data.invitations) {
-          return result;
-        }
-        
         return {
           success: true,
           data: {
-            invitations: Array.isArray(result.data) ? result.data : []
+            invitations: result.data.invitations || []
           }
         };
       }

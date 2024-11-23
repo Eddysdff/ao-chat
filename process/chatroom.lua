@@ -397,20 +397,8 @@ Handlers.add(
   "GetPendingInvitations",
   Handlers.utils.hasMatchingTag("Action", "GetPendingInvitations"),
   function(msg)
-    -- 调试日志
-    ao.send({
-      Target = ao.id,
-      Action = "Debug",
-      Data = {
-        handler = "GetPendingInvitations",
-        msg = msg,
-        msg_from = msg.From,
-        msg_data = msg.Data,
-        msg_tags = msg.Tags
-      }
-    })
-
     local address = msg.From
+    local requestId = msg.Tags.Reference -- 使用消息的 Reference 作为请求ID
 
     -- 验证地址
     if not Handlers.utils.validateAddress(address) then
@@ -430,23 +418,20 @@ Handlers.add(
       end
     end
 
-    -- 添加返回值的调试日志
+    -- 发送直接响应给请求者
     ao.send({
-      Target = ao.id,
-      Action = "Debug",
+      Target = address,
+      Action = "GetPendingInvitationsResult",
+      Tags = {
+        ["Request-ID"] = requestId,
+        ["Response-Type"] = "DirectResult"
+      },
       Data = {
-        handler = "GetPendingInvitations",
-        result = {
-          success = true,
-          data = {
-            invitations = pendingInvitations
-          }
+        success = true,
+        data = {
+          invitations = pendingInvitations
         }
       }
-    })
-
-    return Handlers.utils.createResponse(true, {
-      invitations = pendingInvitations
     })
   end
 )
