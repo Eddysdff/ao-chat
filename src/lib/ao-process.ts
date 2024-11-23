@@ -31,8 +31,7 @@ export class AOProcess {
         
         console.log(`[AO] Sending message attempt ${i + 1}:`, {
           action,
-          rawData: data,
-          encodedData,
+          data,
           targetProcess
         });
 
@@ -52,51 +51,66 @@ export class AOProcess {
           signer,
         });
 
-        console.log(`[AO] Raw response:`, result);
+        console.log('[AO] Initial response (message ID):', result);
 
-        if (result && typeof result === 'object') {
-          if ('Output' in result) {
-            if (typeof result.Output === 'string') {
-              try {
-                return JSON.parse(result.Output);
-              } catch (error) {
-                console.error('[AO] Failed to parse Output string:', error);
-                return result.Output;
+        if (result && result.data) {
+          await new Promise(resolve => setTimeout(resolve, 3000));
+
+          const messageResult = await client.message({
+            process: targetProcess,
+            tags: [
+              { name: 'Action', value: 'GetResults' },
+              { name: 'Input', value: result.data }
+            ],
+            data: new Uint8Array(),
+            signer,
+          });
+
+          console.log('[AO] Message result:', messageResult);
+
+          if (messageResult && Array.isArray(messageResult.Messages)) {
+            for (const message of messageResult.Messages) {
+              const isDebugMessage = message.Tags?.some(tag => 
+                tag.name === 'Action' && tag.value === 'Debug'
+              );
+
+              if (isDebugMessage && message.Data) {
+                console.log('[AO] Found debug message:', message.Data);
+                
+                if (message.Data.handler === action && message.Data.result) {
+                  return message.Data.result;
+                }
               }
             }
-            return result.Output;
-          }
-          if ('success' in result) {
-            return result;
+
+            const lastMessage = messageResult.Messages[messageResult.Messages.length - 1];
+            if (lastMessage && lastMessage.Data) {
+              return {
+                success: true,
+                data: lastMessage.Data
+              };
+            }
           }
         }
 
+        console.log('[AO] No valid response found');
         return {
-          success: true,
-          data: result
+          success: false,
+          error: 'No valid response found'
         };
 
       } catch (error) {
         console.error(`[AO] Attempt ${i + 1} failed:`, error);
         lastError = error;
-        
-        if (error instanceof Error) {
-          console.error('[AO] Error details:', {
-            name: error.name,
-            message: error.message,
-            stack: error.stack
-          });
-        }
-        
         if (i < maxRetries - 1) {
           await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, i)));
         }
       }
     }
-    
+
     return {
       success: false,
-      error: lastError instanceof Error ? lastError.message : 'Unknown error'
+      error: lastError?.message || 'Max retries reached'
     };
   }
 
@@ -191,10 +205,27 @@ export class AOProcess {
   static async getPendingInvitations(): Promise<ProcessResult> {
     try {
       const data = {
-        timestamp: Math.floor(Date.now() / 1000)
+        timestamp: Date.now()
       };
 
-      return await this.sendMessageWithRetry('GetPendingInvitations', data);
+      console.log('[AO] Getting pending invitations...');
+      const result = await this.sendMessageWithRetry('GetPendingInvitations', data);
+      console.log('[AO] GetPendingInvitations complete result:', result);
+
+      if (result.success && result.data) {
+        if (result.data.invitations) {
+          return result;
+        }
+        
+        return {
+          success: true,
+          data: {
+            invitations: Array.isArray(result.data) ? result.data : []
+          }
+        };
+      }
+
+      return result;
     } catch (error) {
       console.error('[AO] Get pending invitations error:', error);
       throw error;

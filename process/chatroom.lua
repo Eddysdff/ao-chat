@@ -102,6 +102,17 @@ Handlers.add(
   "AddUser",
   Handlers.utils.hasMatchingTag("Action", "AddUser"),
   function(msg)
+    ao.send({
+      Target = ao.id,
+      Action = "Debug",
+      Data = {
+        handler = "AddUser",
+        msg = msg,
+        msg_from = msg.From,
+        msg_data = msg.Data,
+        msg_tags = msg.Tags
+      }
+    })
     local address = msg.From
     
     -- 检查用户是否已存在
@@ -125,7 +136,6 @@ Handlers.add(
   "SendInvitation",
   Handlers.utils.hasMatchingTag("Action", "SendInvitation"),
   function(msg)
-    -- 添加详细的调试日志
     ao.send({
       Target = ao.id,
       Action = "Debug",
@@ -191,6 +201,18 @@ Handlers.add(
   "AcceptInvitation",
   Handlers.utils.hasMatchingTag("Action", "AcceptInvitation"),
   function(msg)
+    ao.send({
+      Target = ao.id,
+      Action = "Debug",
+      Data = {
+        handler = "AcceptInvitation",
+        msg = msg,
+        msg_from = msg.From,
+        msg_data = msg.Data,
+        msg_tags = msg.Tags
+      }
+    })
+
     local to = msg.From
     local data = msg.Data
     local from = data.from
@@ -233,6 +255,18 @@ Handlers.add(
   "SendMessage",
   Handlers.utils.hasMatchingTag("Action", "SendMessage"),
   function(msg)
+    ao.send({
+      Target = ao.id,
+      Action = "Debug",
+      Data = {
+        handler = "SendMessage",
+        msg = msg,
+        msg_from = msg.From,
+        msg_data = msg.Data,
+        msg_tags = msg.Tags
+      }
+    })
+
     local sender = msg.From
     local data = msg.Data
     local receiver = data.receiver
@@ -282,6 +316,18 @@ Handlers.add(
   "GetMessages",
   Handlers.utils.hasMatchingTag("Action", "GetMessages"),
   function(msg)
+    ao.send({
+      Target = ao.id,
+      Action = "Debug",
+      Data = {
+        handler = "GetMessages",
+        msg = msg,
+        msg_from = msg.From,
+        msg_data = msg.Data,
+        msg_tags = msg.Tags
+      }
+    })
+
     local address = msg.From
     local data = msg.Data
     local otherAddress = data.otherAddress
@@ -314,6 +360,18 @@ Handlers.add(
   "GetContacts",
   Handlers.utils.hasMatchingTag("Action", "GetContacts"),
   function(msg)
+    ao.send({
+      Target = ao.id,
+      Action = "Debug",
+      Data = {
+        handler = "GetContacts",
+        msg = msg,
+        msg_from = msg.From,
+        msg_data = msg.Data,
+        msg_tags = msg.Tags
+      }
+    })
+
     local address = msg.From
 
     -- 验证地址
@@ -339,6 +397,19 @@ Handlers.add(
   "GetPendingInvitations",
   Handlers.utils.hasMatchingTag("Action", "GetPendingInvitations"),
   function(msg)
+    -- 调试日志
+    ao.send({
+      Target = ao.id,
+      Action = "Debug",
+      Data = {
+        handler = "GetPendingInvitations",
+        msg = msg,
+        msg_from = msg.From,
+        msg_data = msg.Data,
+        msg_tags = msg.Tags
+      }
+    })
+
     local address = msg.From
 
     -- 验证地址
@@ -358,6 +429,21 @@ Handlers.add(
         end
       end
     end
+
+    -- 添加返回值的调试日志
+    ao.send({
+      Target = ao.id,
+      Action = "Debug",
+      Data = {
+        handler = "GetPendingInvitations",
+        result = {
+          success = true,
+          data = {
+            invitations = pendingInvitations
+          }
+        }
+      }
+    })
 
     return Handlers.utils.createResponse(true, {
       invitations = pendingInvitations
