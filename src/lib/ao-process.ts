@@ -1,4 +1,5 @@
 import { createDataItemSigner, connect } from '@permaweb/ao-sdk';
+import { result } from '@permaweb/aoconnect';
 import { ProcessResult } from '@/types/ao';
 import { getConfig } from '@/config';
 
@@ -20,42 +21,79 @@ export class AOProcess {
     return encoder.encode(dataString);
   }
 
-  private static async waitForResponse(requestId: string, action: string, timeout: number = 10000): Promise<ProcessResult> {
+  private static async waitForResponse(messageId: string, action: string, timeout: number = 10000): Promise<ProcessResult> {
     return new Promise((resolve, reject) => {
       let timeoutId: NodeJS.Timeout;
       
-      const messageHandler = (event: any) => {
-        if (!event.messages) return;
-        
-        for (const message of event.messages) {
-          // 检查是否是对应的响应消息
-          const isMatchingResponse = message.Tags?.some(tag => 
-            tag.name === 'Action' && tag.value === `${action}Result`
-          );
+      const checkResult = async () => {
+        try {
+          const { Messages, Error } = await result({
+            message: messageId,
+            process: PROCESS_ID
+          });
 
-          if (isMatchingResponse && message.Data) {
-            console.log(`[AO] Found ${action} response:`, message);
-            clearTimeout(timeoutId);
-            window.removeEventListener('ao-messages', messageHandler);
-            
-            try {
-              const data = typeof message.Data === 'string' 
-                ? JSON.parse(message.Data) 
-                : message.Data;
-              resolve(data);
-            } catch (error) {
-              console.error('[AO] Error parsing response data:', error);
-              resolve(message.Data);
-            }
+          if (Error) {
+            console.error(`[AO] Process error:`, Error);
             return;
           }
+
+          if (Messages && Messages.length > 0) {
+            const responseMessage = Messages.find(msg => msg.Data);
+
+            if (responseMessage && responseMessage.Data) {
+              console.log(`[AO] Found raw response for ${action}:`, responseMessage.Data);
+              clearTimeout(timeoutId);
+              clearInterval(pollInterval);
+              
+              try {
+                let parsedData;
+                if (typeof responseMessage.Data === 'string') {
+                  parsedData = JSON.parse(responseMessage.Data);
+                } else {
+                  parsedData = responseMessage.Data;
+                }
+                
+                console.log(`[AO] Parsed data for ${action}:`, parsedData);
+
+                if (parsedData.success !== undefined) {
+                  resolve(parsedData);
+                } else if (parsedData.handler === 'GetContacts' && Array.isArray(parsedData.contacts)) {
+                  resolve({
+                    success: true,
+                    data: {
+                      contacts: parsedData.contacts
+                    }
+                  });
+                } else if (parsedData.handler && parsedData.response) {
+                  resolve(parsedData.response);
+                } else {
+                  resolve({
+                    success: false,
+                    error: 'Invalid response format',
+                    data: parsedData
+                  });
+                }
+                return;
+              } catch (error) {
+                console.error('[AO] Error parsing response data:', error);
+                resolve({
+                  success: false,
+                  error: 'Failed to parse response data',
+                  data: responseMessage.Data
+                });
+              }
+            }
+          }
+        } catch (error) {
+          console.error('[AO] Error checking result:', error);
         }
       };
 
-      window.addEventListener('ao-messages', messageHandler);
+      const pollInterval = setInterval(checkResult, 2000);
+      checkResult();
 
       timeoutId = setTimeout(() => {
-        window.removeEventListener('ao-messages', messageHandler);
+        clearInterval(pollInterval);
         reject(new Error('Response timeout'));
       }, timeout);
     });
@@ -72,10 +110,8 @@ export class AOProcess {
     for (let i = 0; i < maxRetries; i++) {
       try {
         const encodedData = this.prepareData(data);
-        const requestId = crypto.randomUUID();
         
         console.log(`[AO] Sending ${action} request:`, {
-          requestId,
           data
         });
 
@@ -86,23 +122,22 @@ export class AOProcess {
         const signer = createDataItemSigner(window.arweaveWallet);
 
         // 发送请求
-        const result = await client.message({
+        const messageResult = await client.message({
           process: targetProcess,
           tags: [
             { name: 'Action', value: action },
-            { name: 'Content-Type', value: 'application/json' },
-            { name: 'Reference', value: requestId }
+            { name: 'Content-Type', value: 'application/json' }
           ],
           data: encodedData,
           signer,
         });
 
-        console.log(`[AO] ${action} request sent:`, result);
+        console.log(`[AO] ${action} request sent with ID:`, messageResult);
 
         // 只有需要等待响应的操作才等待
         if (ACTIONS_NEED_RESPONSE.includes(action)) {
           try {
-            const response = await this.waitForResponse(requestId, action);
+            const response = await this.waitForResponse(messageResult, action);
             console.log(`[AO] ${action} response received:`, response);
             return response;
           } catch (error) {
@@ -116,7 +151,7 @@ export class AOProcess {
           // 写入操作直接返回发送结果
           return {
             success: true,
-            data: result.data
+            data: messageResult
           };
         }
 
@@ -216,7 +251,25 @@ export class AOProcess {
         timestamp: Math.floor(Date.now() / 1000)
       };
 
-      return await this.sendMessageWithRetry('GetContacts', data);
+      console.log('[AO] Getting contacts...');
+      const result = await this.sendMessageWithRetry('GetContacts', data);
+      console.log('[AO] GetContacts raw result:', result);
+
+      if (result.success && result.data?.contacts) {
+        const formattedContacts = result.data.contacts.map(contact => ({
+          address: contact.address,
+          nickname: contact.nickname || `User-${contact.address.slice(0, 6)}`
+        }));
+
+        return {
+          success: true,
+          data: {
+            contacts: formattedContacts
+          }
+        };
+      }
+
+      return result;
     } catch (error) {
       console.error('[AO] Get contacts error:', error);
       throw error;

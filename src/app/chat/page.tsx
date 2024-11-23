@@ -12,10 +12,12 @@ import { ChatRoom } from '@/types/ao';
 export default function ChatPage() {
   const router = useRouter();
   const [address, setAddress] = useState<string | null>(null);
-  const [activeChatRoom, setActiveChatRoom] = useState<ChatRoom | null>(null);
-  const [isCreatingChat, setIsCreatingChat] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [currentChat, setCurrentChat] = useState<{
+    contact: Contact;
+    messages: Message[];
+  } | null>(null);
 
   const handleConnect = async () => {
     try {
@@ -67,63 +69,60 @@ export default function ChatPage() {
     };
   }, []);
 
-  const handleCreateChat = async (participantAddress: string) => {
-    if (!address) return;
-    
+  const handleStartChat = (contact: Contact) => {
+    setCurrentChat({
+      contact,
+      messages: []  // 初始化空消息列表
+    });
+  };
+
+  const handleSendMessage = async (content: string) => {
+    if (!currentChat || !address) return;
+
     try {
-      setIsCreatingChat(true);
-      setError(null);
+      const result = await AOProcess.sendMessage(
+        currentChat.contact.address,
+        content,
+        false  // 暂时不加密
+      );
 
-      console.log('[Chat] Creating chatroom with participant:', participantAddress);
-      
-      // 先检查进程状态
-      const processState = await AOProcess.debugState();
-      console.log('[Chat] Current process state:', processState);
-
-      const result = await AOProcess.createChatroom(participantAddress);
-      console.log('[Chat] Create chatroom result:', result);
-
-      if (result?.success && result.chatroom) {
-        setActiveChatRoom(result.chatroom);
+      if (result.success) {
+        // 发送成功后立即刷新消息
+        loadMessages();
       } else {
-        console.error('[Chat] Failed to create chatroom:', result);
-        throw new Error(result?.error || 'Failed to create chatroom');
+        throw new Error(result.error || 'Failed to send message');
       }
     } catch (error) {
-      console.error('[Chat] Error creating chatroom:', error);
-      setError(error instanceof Error ? error.message : 'Failed to create chat room. Please try again.');
-      throw error; // 重新抛出错误以便上层组件处理
-    } finally {
-      setIsCreatingChat(false);
+      console.error('[Chat] Send message failed:', error);
+      setError(error instanceof Error ? error.message : 'Failed to send message');
     }
   };
 
-  const handleChatInvitationAccepted = async (chatRoom: ChatRoom) => {
+  const loadMessages = async () => {
+    if (!currentChat || !address) return;
+
     try {
-      setError(null);
-      // 加入聊天室
-      const joinResult = await AOProcess.joinChatroom(chatRoom.processId);
-      if (joinResult.success) {
-        setActiveChatRoom(chatRoom);
-      } else {
-        throw new Error(joinResult.error || 'Failed to join chatroom');
+      const result = await AOProcess.getMessages(currentChat.contact.address);
+      if (result.success && result.data?.messages) {
+        setCurrentChat(prev => ({
+          ...prev!,
+          messages: result.data.messages
+        }));
       }
     } catch (error) {
-      console.error('Error joining chatroom:', error);
-      setError('Failed to join chat room. Please try again.');
+      console.error('[Chat] Load messages failed:', error);
+      setError(error instanceof Error ? error.message : 'Failed to load messages');
     }
   };
 
-  // 添加重新连接功能
-  const handleReconnect = async () => {
-    try {
-      setError(null);
-      await checkExistingConnection();
-    } catch (error) {
-      console.error('Reconnection failed:', error);
-      setError('Failed to reconnect. Please try again.');
-    }
-  };
+  // 定期刷新消息
+  useEffect(() => {
+    if (!currentChat) return;
+
+    loadMessages();
+    const interval = setInterval(loadMessages, 5000);
+    return () => clearInterval(interval);
+  }, [currentChat?.contact.address]);
 
   if (isLoading) {
     return <div className="flex h-screen items-center justify-center">
@@ -158,7 +157,7 @@ export default function ChatPage() {
             <span className="mr-2">⚠️</span>
             {error}
             <button
-              onClick={handleReconnect}
+              onClick={handleConnect}
               className="ml-4 text-red-500 hover:text-red-600 underline"
             >
               Retry
@@ -168,14 +167,15 @@ export default function ChatPage() {
       )}
       <div className="flex flex-1 overflow-hidden">
         <ContactsList
-          onCreateChat={handleCreateChat}
-          onChatInvitationAccepted={handleChatInvitationAccepted}
-          isCreatingChat={isCreatingChat}
+          onStartChat={handleStartChat}
         />
-        <ChatWindow
-          currentUserAddress={address}
-          chatRoom={activeChatRoom}
-        />
+        {currentChat && (
+          <ChatWindow
+            contact={currentChat.contact}
+            messages={currentChat.messages}
+            onSendMessage={handleSendMessage}
+          />
+        )}
       </div>
     </div>
   );

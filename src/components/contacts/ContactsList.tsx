@@ -6,9 +6,8 @@ import { Contact, ContactInvitation } from '@/types/ao';
 import Notification from '../common/Notification';
 
 interface ContactsListProps {
-  onSelectContact: (contact: Contact) => void;
   onStartChat: (contact: Contact) => void;
-  selectedContact: Contact | null;
+  isCreatingChat?: boolean;
 }
 
 // 添加联系人模态框组件
@@ -111,15 +110,15 @@ function AddContactModal({ isOpen, onClose, onSubmit, isSubmitting }: AddContact
 }
 
 export default function ContactsList({
-  onSelectContact,
   onStartChat,
-  selectedContact
+  isCreatingChat = false
 }: ContactsListProps) {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [invitations, setInvitations] = useState<ContactInvitation[]>([]);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
   const [notification, setNotification] = useState<{
     type: 'success' | 'error' | 'info';
     message: string;
@@ -136,36 +135,29 @@ export default function ContactsList({
       const invitationsResult = await AOProcess.getPendingInvitations();
       console.log('[Contacts] Raw invitations result:', invitationsResult);
 
-      if (invitationsResult.success) {
-        if (invitationsResult.Output?.data) {
-          try {
-            const parsedData = JSON.parse(invitationsResult.Output.data);
-            console.log('[Contacts] Parsed invitations data:', parsedData);
-            setInvitations(parsedData.invitations || []);
-          } catch (error) {
-            console.error('[Contacts] Failed to parse invitations data:', error);
-            setInvitations([]);
-          }
-        } else {
-          console.log('[Contacts] No invitations data in Output');
-          setInvitations([]);
-        }
+      if (invitationsResult.success && invitationsResult.data?.invitations) {
+        setInvitations(invitationsResult.data.invitations);
+        console.log('[Contacts] Invitations loaded:', invitationsResult.data.invitations);
+      } else {
+        console.log('[Contacts] No invitations found');
+        setInvitations([]);
       }
 
       // 获取联系人
       const contactsResult = await AOProcess.getContacts();
       console.log('[Contacts] Raw contacts result:', contactsResult);
 
-      if (contactsResult.success) {
-        if (contactsResult.Output?.data) {
-          try {
-            const parsedData = JSON.parse(contactsResult.Output.data);
-            console.log('[Contacts] Parsed contacts data:', parsedData);
-            setContacts(parsedData.contacts || []);
-          } catch (error) {
-            console.error('[Contacts] Failed to parse contacts data:', error);
-          }
-        }
+      if (contactsResult.success && Array.isArray(contactsResult.data?.contacts)) {
+        const formattedContacts = contactsResult.data.contacts.map(contact => ({
+          address: contact.address,
+          nickname: contact.nickname || `User-${contact.address.slice(0, 6)}`,
+          status: 'offline' // 默认离线状态
+        }));
+        console.log('[Contacts] Formatted contacts:', formattedContacts);
+        setContacts(formattedContacts);
+      } else {
+        console.log('[Contacts] No contacts found or invalid format');
+        setContacts([]);
       }
 
       setError(null);
@@ -285,6 +277,22 @@ export default function ContactsList({
     };
   }, []);
 
+  const handleContactClick = (contact: Contact) => {
+    setSelectedContact(contact);
+  };
+
+  const handleStartChat = async (contact: Contact) => {
+    try {
+      onStartChat(contact);
+    } catch (error) {
+      console.error('[Contacts] Start chat failed:', error);
+      setNotification({
+        type: 'error',
+        message: error instanceof Error ? error.message : 'Failed to start chat'
+      });
+    }
+  };
+
   return (
     <div className="w-80 border-r border-gray-200 h-full flex flex-col">
       {/* Add Contact Button */}
@@ -344,8 +352,9 @@ export default function ContactsList({
                 p-4 border-b border-gray-200
                 hover:bg-gray-50 transition-colors duration-200
                 ${selectedContact?.address === contact.address ? 'bg-gray-50' : ''}
+                cursor-pointer
               `}
-              onClick={() => onSelectContact(contact)}
+              onClick={() => handleContactClick(contact)}
             >
               <div className="flex justify-between items-center">
                 <div>
@@ -360,11 +369,12 @@ export default function ContactsList({
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
-                    onStartChat(contact);
+                    handleStartChat(contact);
                   }}
-                  className="mt-2 w-full bg-green-500 hover:bg-green-600 text-white text-sm font-semibold py-1 px-2 rounded transition-colors duration-200"
+                  disabled={isCreatingChat}
+                  className="mt-2 w-full bg-green-500 hover:bg-green-600 text-white text-sm font-semibold py-1 px-2 rounded transition-colors duration-200 disabled:opacity-50"
                 >
-                  Start Chat
+                  {isCreatingChat ? 'Creating Chat...' : 'Start Chat'}
                 </button>
               )}
             </div>

@@ -360,35 +360,46 @@ Handlers.add(
   "GetContacts",
   Handlers.utils.hasMatchingTag("Action", "GetContacts"),
   function(msg)
-    ao.send({
-      Target = ao.id,
-      Action = "Debug",
-      Data = {
-        handler = "GetContacts",
-        msg = msg,
-        msg_from = msg.From,
-        msg_data = msg.Data,
-        msg_tags = msg.Tags
-      }
-    })
-
     local address = msg.From
-
+    
     -- 验证地址
     if not Handlers.utils.validateAddress(address) then
-      return Handlers.utils.createResponse(false, nil, "Invalid address format")
+      return Handlers.utils.reply(msg, {
+        success = false,
+        error = "Invalid address format"
+      })
     end
 
     -- 获取联系人列表
     local contacts = {}
     if State.contacts[address] then
-      for contactId, _ in pairs(State.contacts[address]) do
-        table.insert(contacts, contactId)
+      for contactAddress, _ in pairs(State.contacts[address]) do
+        -- 将每个联系人地址转换为联系人对象
+        table.insert(contacts, {
+          address = contactAddress,
+          nickname = "User-" .. string.sub(contactAddress, 1, 6)  -- 临时昵称
+        })
       end
     end
 
-    return Handlers.utils.createResponse(true, {
-      contacts = contacts
+    -- 添加调试日志
+    ao.send({
+      Target = ao.id,
+      Action = "Debug",
+      Data = {
+        handler = "GetContacts",
+        from = address,
+        contacts = contacts,
+        state_contacts = State.contacts[address]
+      }
+    })
+
+    -- 返回标准格式的响应
+    return Handlers.utils.reply(msg, {
+      success = true,
+      data = {
+        contacts = contacts
+      }
     })
   end
 )
@@ -435,3 +446,4 @@ Handlers.add(
     })
   end
 )
+
