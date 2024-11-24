@@ -9,6 +9,21 @@ import ContactsList from '@/components/contacts/ContactsList';
 import ChatWindow from '@/components/chat/ChatWindow';
 import { Contact, Message } from '@/types/ao';
 
+// 修改消息类型定义
+interface RawMessage {
+  timestamp: number;
+  content: string;
+  encrypted: boolean;
+  sender: string;
+}
+
+interface ProcessMessageResponse {
+  success: boolean;
+  data?: {
+    messages: RawMessage[];
+  };
+}
+
 export default function ChatPage() {
   const router = useRouter();
   const [address, setAddress] = useState<string | null>(null);
@@ -111,18 +126,44 @@ export default function ChatPage() {
       }
       
       const result = await AOProcess.getMessages(targetAddress);
+      console.log('[Chat] Messages result:', result);
       
-      if (result.success) {
+      if (result?.success && result?.data?.messages) {
         setCurrentChat(prev => {
           if (!prev) return null;
-          const newMessages = result.data?.messages || [];
-          if (JSON.stringify(prev.messages) === JSON.stringify(newMessages)) {
+
+          try {
+            // 首先确保消息数组符合预期格式
+            const rawMessages = (result.data?.messages || []).map(msg => ({
+              ...msg,
+              encrypted: false
+            })) as RawMessage[];
+            
+            // 转换消息格式以匹配 Message 接口
+            const newMessages: Message[] = rawMessages.map(msg => ({
+              id: String(msg.timestamp),
+              sender: msg.sender,
+              content: msg.content,
+              timestamp: msg.timestamp,
+              status: 'delivered' as const,
+              encrypted: msg.encrypted
+            }));
+
+            console.log('[Chat] Formatted messages:', newMessages);
+
+            // 检查消息是否有变化
+            if (JSON.stringify(prev.messages) === JSON.stringify(newMessages)) {
+              return prev;
+            }
+
+            return {
+              ...prev,
+              messages: newMessages
+            };
+          } catch (error) {
+            console.error('[Chat] Message format error:', error);
             return prev;
           }
-          return {
-            ...prev,
-            messages: newMessages
-          };
         });
       }
     } catch (error) {

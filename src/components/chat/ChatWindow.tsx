@@ -2,13 +2,13 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { AOProcess } from '@/lib/ao-process';
-import { Contact, ChatMessage } from '@/types/ao';
+import { Contact, Message } from '@/types/ao';
 import { ArConnectService } from '@/lib/arconnect';
 import MessageBubble from './MessageBubble';
 
 interface ChatWindowProps {
   contact: Contact;
-  messages: ChatMessage[];
+  messages: Message[];
   onSendMessage: (content: string) => Promise<void>;
   isLoadingMessages?: boolean;
 }
@@ -24,7 +24,7 @@ export default function ChatWindow({
   const [address, setAddress] = useState<string>('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const [filteredMessages, setFilteredMessages] = useState<ChatMessage[]>([]);
+  const [filteredMessages, setFilteredMessages] = useState<Message[]>([]);
   const [isSearching, setIsSearching] = useState(false);
 
   useEffect(() => {
@@ -61,7 +61,7 @@ export default function ChatWindow({
     }
   };
 
-  const searchMessages = async (searchTerm: string): Promise<ChatMessage[]> => {
+  const searchMessages = async (searchTerm: string): Promise<Message[]> => {
     if (!searchTerm.trim()) {
       return messages;
     }

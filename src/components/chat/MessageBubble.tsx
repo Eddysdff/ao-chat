@@ -1,9 +1,9 @@
-import { ChatMessage } from '@/types/ao';
+import { Message } from '@/types/ao';
 import { useEffect, useState } from 'react';
 import { formatDistanceToNow } from 'date-fns';
 
 interface MessageBubbleProps {
-  message: ChatMessage;
+  message: Message;
   isSender: boolean;
   showAvatar?: boolean;
 }

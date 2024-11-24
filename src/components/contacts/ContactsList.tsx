@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { AOProcess } from '@/lib/ao-process';
-import { Contact, ContactInvitation } from '@/types/ao';
+import { Contact, ContactInvitation, ApiResponse } from '@/types/ao';
 import Notification from '../common/Notification';
 
 interface ContactsListProps {
@@ -126,6 +126,28 @@ function AddContactModal({ isOpen, onClose, onSubmit, isSubmitting }: AddContact
   );
 }
 
+// 定义API返回的联系人类型
+interface ApiContact {
+  address: string;
+  nickname?: string;
+  // 其他可能的API返回字段
+}
+
+// 定义API响应类型
+interface ContactsApiResponse extends ApiResponse<{
+  contacts: ApiContact[];
+}> {}
+
+// 添加类型守卫
+function hasInvitations(data: any): data is { invitations: ContactInvitation[] } {
+  return data && Array.isArray(data.invitations);
+}
+
+// 添加联系人数据的类型守卫
+function hasContacts(data: any): data is { contacts: ApiContact[] } {
+  return data && Array.isArray(data.contacts);
+}
+
 export default function ContactsList({
   onStartChat,
   isCreatingChat = false
@@ -140,6 +162,7 @@ export default function ContactsList({
     type: 'success' | 'error' | 'info';
     message: string;
   } | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const loadData = async (retryCount = 0) => {
     try {
@@ -147,28 +170,34 @@ export default function ContactsList({
         setIsLoading(true);
       }
       
+      console.log('[Contacts] Loading data...');
       const [invitationsResult, contactsResult] = await Promise.all([
         AOProcess.getPendingInvitations(),
         AOProcess.getContacts()
       ]);
 
-      if (invitationsResult.success && invitationsResult.data?.invitations) {
-        const newInvitations = invitationsResult.data.invitations;
-        setInvitations(prev => 
-          JSON.stringify(prev) !== JSON.stringify(newInvitations) ? newInvitations : prev
-        );
+      console.log('[Contacts] Raw contacts result:', contactsResult);
+
+      if (contactsResult.success && hasContacts(contactsResult.data)) {
+        const newContacts = contactsResult.data.contacts.map(apiContact => ({
+          ...apiContact,
+          name: apiContact.nickname || apiContact.address.slice(0, 8),
+          status: 'offline' as const,
+          unread: 0,
+          nickname: apiContact.nickname || apiContact.address.slice(0, 8)
+        }));
+        setContacts(newContacts);
+        console.log('[Contacts] Contacts set:', newContacts);
+      } else {
+        console.log('[Contacts] No contacts data found in response');
+        setContacts([]); // 确保在没有数据时设置空数组
       }
 
-      if (contactsResult.success && Array.isArray(contactsResult.data?.contacts)) {
-        const formattedContacts = contactsResult.data.contacts.map(contact => ({
-          address: contact.address,
-          nickname: contact.nickname || `User-${contact.address.slice(0, 6)}`,
-          status: 'offline'
-        }));
-        
-        setContacts(prev => 
-          JSON.stringify(prev) !== JSON.stringify(formattedContacts) ? formattedContacts : prev
-        );
+      // 处理邀请
+      if (invitationsResult.success && invitationsResult.data && hasInvitations(invitationsResult.data)) {
+        const newInvitations = invitationsResult.data.invitations;
+        setInvitations(newInvitations);
+        console.log('[Contacts] Invitations set:', newInvitations);
       }
     } catch (error) {
       console.error('[Contacts] Load data failed:', error);
@@ -182,55 +211,57 @@ export default function ContactsList({
 
   const handleAddContact = async (address: string, nickname: string) => {
     try {
-      setNotification({
-        type: 'info',
-        message: 'Sending invitation...'
-      });
-
+      setIsSubmitting(true);
       console.log('[Contacts] Adding contact:', { address, nickname });
-      
-      const result = await AOProcess.sendInvitation(address, nickname);
-      
+
+      // 只传入 address
+      const result = await AOProcess.sendInvitation(address);
+
       if (result.error?.includes('initialization')) {
         setNotification({
-          type: 'info',
-          message: 'Chat service is initializing, please wait a moment and try again.'
+          type: 'error',
+          message: 'Please initialize your profile first'
         });
         return;
       }
-      
-      if (result.success) {
-        setNotification({
-          type: 'success',
-          message: 'Invitation sent successfully'
-        });
-        await loadData();
-      } else {
-        throw new Error(result.error || 'Failed to send invitation');
+
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to add contact');
       }
+
+      // 成功后的处理
+      setNotification({
+        type: 'success',
+        message: 'Contact invitation sent successfully'
+      });
+
+      // 可能需要更新本地联系人列表
+      await loadData();
     } catch (error) {
       console.error('[Contacts] Add contact failed:', error);
       setNotification({
         type: 'error',
         message: error instanceof Error ? error.message : 'Failed to add contact'
       });
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
   const handleAcceptInvitation = async (invitation: ContactInvitation) => {
     try {
-      console.log('[Contacts] Accepting invitation:', invitation);
+      setIsSubmitting(true);
       
-      const result = await AOProcess.acceptInvitation(
-        invitation.from,
-        `User-${invitation.from.slice(0, 6)}`
-      );
-      
+      // 只传入地址参数
+      const result = await AOProcess.acceptInvitation(invitation.from);
+
       if (result.success) {
         setNotification({
           type: 'success',
           message: 'Contact added successfully'
         });
+        
+        // 刷新联系人列表
         await loadData();
       } else {
         throw new Error(result.error || 'Failed to accept invitation');
@@ -241,6 +272,8 @@ export default function ContactsList({
         type: 'error',
         message: error instanceof Error ? error.message : 'Failed to accept invitation'
       });
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -290,6 +323,30 @@ export default function ContactsList({
     onStartChat(contact);
     setSelectedContact(null); // 清除选中状态
   };
+
+  const initializeUser = async () => {
+    try {
+      // 获取地址
+      const address = await window.arweaveWallet.getActiveAddress();
+      
+      // 不传递参数调用 addUser
+      await AOProcess.addUser();
+
+      // 然后加载数据
+      await loadData();
+    } catch (error) {
+      console.error('[Contacts] Initialize user failed:', error);
+      setNotification({
+        type: 'error',
+        message: error instanceof Error ? error.message : 'Failed to initialize user'
+      });
+    }
+  };
+
+  // 在组件中添加一个 useEffect 来监听 contacts 的变化
+  useEffect(() => {
+    console.log('[Contacts] Contacts state updated:', contacts);
+  }, [contacts]);
 
   return (
     <div className="w-80 border-r border-gray-200 h-full flex flex-col bg-white">
@@ -411,7 +468,7 @@ export default function ContactsList({
         isOpen={isAddModalOpen}
         onClose={() => setIsAddModalOpen(false)}
         onSubmit={handleAddContact}
-        isSubmitting={false}
+        isSubmitting={isSubmitting}
       />
 
       {notification && (

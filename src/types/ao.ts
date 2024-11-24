@@ -1,4 +1,4 @@
-export interface ProcessResult<T = any> {
+export interface ApiResponse<T> {
   success: boolean;
   data?: T;
   error?: string;
@@ -16,7 +16,7 @@ export interface Contact {
   nickname: string;
   name: string;
   avatar?: string;
-  status: 'active' | 'blocked';
+  status: 'online' | 'offline' | 'active' | 'blocked';
   unread: number;
 }
 
@@ -31,8 +31,8 @@ export interface Message {
 
 export interface Invitation {
   from: string;
-  fromNickname: string;
-  name: string;
+  fromNickname?: string;
+  name?: string;
   avatar?: string;
   timestamp: number;
 }
@@ -69,15 +69,36 @@ export const generateSessionId = (addr1: string, addr2: string): string => {
   return `${sortedAddrs[0]}_${sortedAddrs[1]}`;
 };
 
-export interface ChatMessage {
-  id?: string;
-  sender: string;
-  content: string;
-  timestamp: number;
-  status?: 'sent' | 'delivered' | 'read';
-}
-
 export interface ContactInvitation {
   from: string;
   timestamp: number;
+  fromNickname?: string;
+}
+
+export interface GetContactsResponse {
+  handler: string;
+  state_contacts: { [key: string]: boolean };
+  contacts: Array<{ address: string; nickname?: string }>;
+  from: string;
+}
+
+export interface ProcessResult<T = any> {
+  success: boolean;
+  error?: string;
+  handler?: string;
+  state_contacts?: { [key: string]: boolean };
+  contacts?: Array<{ address: string; nickname?: string }>;
+  from?: string;
+  data?: {
+    output?: T;
+    state?: Record<string, any>;
+    messages?: Array<{
+      sender: string;
+      content: string;
+      timestamp: number;
+      encrypted?: boolean;
+    }>;
+    contacts?: Contact[];
+    invitations?: ContactInvitation[];
+  };
 }
