@@ -23,7 +23,7 @@
     "@permaweb/ao-sdk": "^0.0.23",
     "@permaweb/aoconnect": "^0.0.61",
     "date-fns": "^4.1.0",
-    "next": "14.0.4",
+    "next": "^14.2.18",
     "react": "^18",
     "react-dom": "^18"
   },
