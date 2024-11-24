@@ -1,46 +1,10 @@
 -- 初始化状态和数据表
 if not State then
   State = {
-    -- 用户表：存储用户基本信息
-    users = {
-      -- 结构示例：
-      -- ["address"] = {
-      --   name = "用户名",
-      --   timestamp = 123456789
-      -- }
-    },
-
-    -- 联系人表：存储用户的联系人关系
-    contacts = {
-      -- 结构示例：
-      -- ["address1"] = {
-      --   ["address2"] = true
-      -- }
-    },
-
-    -- 消息表：存储聊天记录
-    messages = {
-      -- 结构示例：
-      -- ["address1_address2"] = {
-      --   {
-      --     sender = "address1",
-      --     content = "消息内容",
-      --     timestamp = 123456789,
-      --     encrypted = false
-      --   }
-      -- }
-    },
-
-    -- 邀请表：存储好友邀请
-    invitations = {
-      -- 结构示例：
-      -- ["to_address"] = {
-      --   ["from_address"] = {
-      --     timestamp = 123456789,
-      --     status = "pending"  -- pending/accepted/rejected
-      --   }
-      -- }
-    }
+    users = {},     -- 用户表：address -> {timestamp}
+    contacts = {},  -- 联系人表：address1 -> {address2 -> true}
+    messages = {},  -- 消息表：sessionId -> [{sender, content, timestamp, encrypted}]
+    invitations = {} -- 邀请表：to_address -> {from_address -> {timestamp, status}}
   }
 end
 
@@ -49,70 +13,102 @@ if not Handlers.utils then
   Handlers.utils = {}
 end
 
--- 验证地址格式
 function Handlers.utils.validateAddress(address)
   return type(address) == "string" and string.match(address, "^[a-zA-Z0-9_-]+$")
 end
 
--- 创建响应
 function Handlers.utils.createResponse(success, data, error)
-  return {
-    success = success,
-    data = data,
-    error = error
-  }
+  return { success = success, data = data, error = error }
 end
 
--- 生成会话ID
 function Handlers.utils.getSessionId(addr1, addr2)
-  -- 确保会话ID的一致性（地址按字母顺序排序）
-  if addr1 < addr2 then
-    return addr1 .. "_" .. addr2
-  else
-    return addr2 .. "_" .. addr1
-  end
+  return addr1 < addr2 and addr1.."_"..addr2 or addr2.."_"..addr1
 end
 
--- 检查用户是否存在
 function Handlers.utils.userExists(address)
   return State.users[address] ~= nil
 end
 
--- 检查是否为联系人
 function Handlers.utils.areContacts(addr1, addr2)
   return State.contacts[addr1] and State.contacts[addr1][addr2] == true
 end
 
--- 添加一个工具函数来处理数据解析
 function Handlers.utils.parseData(data)
   if type(data) == "string" then
-    -- 尝试解析 JSON 字符串
-    local success, parsed = pcall(function()
-      return json.decode(data)
-    end)
-    if success and parsed then
-      return parsed
-    end
+    local success, parsed = pcall(function() return json.decode(data) end)
+    if success and parsed then return parsed end
   end
   return data
 end
+
+-- 用户管理处理器
+Handlers.add(
+  "AddUser",
+  Handlers.utils.hasMatchingTag("Action", "AddUser"),
+  function(msg)
+    local address = msg.From
+    
+    if State.users[address] then
+      return Handlers.utils.createResponse(false, nil, "User already exists")
+    end
+
+    State.users[address] = { timestamp = os.time() }
+    return Handlers.utils.createResponse(true, { user = State.users[address] })
+  end
+)
+
+-- 联系人管理处理器
+Handlers.add(
+  "SendInvitation",
+  Handlers.utils.hasMatchingTag("Action", "SendInvitation"),
+  function(msg)
+    local from = msg.From
+    local data = Handlers.utils.parseData(msg.Data)
+    
+    if not from or not Handlers.utils.userExists(from) then
+      return Handlers.utils.createResponse(false, nil, "Invalid or unregistered sender")
+    end
+    
+    local to = data and data.to
+    if not to or not Handlers.utils.validateAddress(to) then
+      return Handlers.utils.createResponse(false, nil, "Invalid recipient address")
+    end
+
+    if not Handlers.utils.userExists(to) then
+      return Handlers.utils.createResponse(false, nil, "Recipient not registered")
+    end
+
+    if Handlers.utils.areContacts(from, to) then
+      return Handlers.utils.createResponse(false, nil, "Already contacts")
+    end
+
+    if State.invitations[to] and State.invitations[to][from] and 
+       State.invitations[to][from].status == "pending" then
+      return Handlers.utils.createResponse(false, nil, "Invitation already sent")
+    end
+
+    if not State.invitations[to] then
+      State.invitations[to] = {}
+    end
+
+    State.invitations[to][from] = {
+      timestamp = os.time(),
+      status = "pending"
+    }
+
+    return Handlers.utils.createResponse(true, {
+      from = from,
+      to = to,
+      timestamp = os.time()
+    })
+  end
+)
 
 -- 1. 用户管理处理器
 Handlers.add(
   "AddUser",
   Handlers.utils.hasMatchingTag("Action", "AddUser"),
   function(msg)
-    ao.send({
-      Target = ao.id,
-      Action = "Debug",
-      Data = {
-        handler = "AddUser",
-        msg = msg,
-        msg_from = msg.From,
-        msg_data = msg.Data,
-        msg_tags = msg.Tags
-      }
-    })
     local address = msg.From
     
     -- 检查用户是否已存在
@@ -136,18 +132,6 @@ Handlers.add(
   "SendInvitation",
   Handlers.utils.hasMatchingTag("Action", "SendInvitation"),
   function(msg)
-    ao.send({
-      Target = ao.id,
-      Action = "Debug",
-      Data = {
-        handler = "SendInvitation",
-        msg = msg,
-        msg_from = msg.From,
-        msg_data = msg.Data,
-        msg_tags = msg.Tags
-      }
-    })
-
     local from = msg.From
     local data = Handlers.utils.parseData(msg.Data)  -- 确保正确解析数据
     
@@ -201,18 +185,6 @@ Handlers.add(
   "AcceptInvitation",
   Handlers.utils.hasMatchingTag("Action", "AcceptInvitation"),
   function(msg)
-    ao.send({
-      Target = ao.id,
-      Action = "Debug",
-      Data = {
-        handler = "AcceptInvitation",
-        msg = msg,
-        msg_from = msg.From,
-        msg_data = msg.Data,
-        msg_tags = msg.Tags
-      }
-    })
-
     local to = msg.From
     local data = msg.Data
     local from = data.from
@@ -255,37 +227,62 @@ Handlers.add(
   "SendMessage",
   Handlers.utils.hasMatchingTag("Action", "SendMessage"),
   function(msg)
-    ao.send({
-      Target = ao.id,
-      Action = "Debug",
-      Data = {
-        handler = "SendMessage",
-        msg = msg,
-        msg_from = msg.From,
-        msg_data = msg.Data,
-        msg_tags = msg.Tags
-      }
-    })
-
     local sender = msg.From
-    local data = msg.Data
+    local data = Handlers.utils.parseData(msg.Data)
     local receiver = data.receiver
     local content = data.content
     local encrypted = data.encrypted or false
+    local requestId = msg.Tags.Reference
 
     -- 验证地址
     if not Handlers.utils.validateAddress(sender) or not Handlers.utils.validateAddress(receiver) then
-      return Handlers.utils.createResponse(false, nil, "Invalid address format")
+      ao.send({
+        Target = sender,
+        Action = "SendMessageResult",
+        Tags = {
+          ["Request-ID"] = requestId,
+          ["Response-Type"] = "DirectResult"
+        },
+        Data = {
+          success = false,
+          error = "Invalid address format"
+        }
+      })
+      return
     end
 
     -- 验证消息内容
     if not content or type(content) ~= "string" or #content == 0 then
-      return Handlers.utils.createResponse(false, nil, "Invalid message content")
+      ao.send({
+        Target = sender,
+        Action = "SendMessageResult",
+        Tags = {
+          ["Request-ID"] = requestId,
+          ["Response-Type"] = "DirectResult"
+        },
+        Data = {
+          success = false,
+          error = "Invalid message content"
+        }
+      })
+      return
     end
 
     -- 检查是否为联系人
     if not Handlers.utils.areContacts(sender, receiver) then
-      return Handlers.utils.createResponse(false, nil, "Not contacts")
+      ao.send({
+        Target = sender,
+        Action = "SendMessageResult",
+        Tags = {
+          ["Request-ID"] = requestId,
+          ["Response-Type"] = "DirectResult"
+        },
+        Data = {
+          success = false,
+          error = "Not contacts"
+        }
+      })
+      return
     end
 
     -- 生成会话ID
@@ -305,9 +302,21 @@ Handlers.add(
     }
     table.insert(State.messages[sessionId], message)
 
-    return Handlers.utils.createResponse(true, {
-      sessionId = sessionId,
-      timestamp = message.timestamp
+    -- 发送直接响应
+    ao.send({
+      Target = sender,
+      Action = "SendMessageResult",
+      Tags = {
+        ["Request-ID"] = requestId,
+        ["Response-Type"] = "DirectResult"
+      },
+      Data = {
+        success = true,
+        data = {
+          messageId = #State.messages[sessionId],
+          timestamp = message.timestamp
+        }
+      }
     })
   end
 )
@@ -316,30 +325,43 @@ Handlers.add(
   "GetMessages",
   Handlers.utils.hasMatchingTag("Action", "GetMessages"),
   function(msg)
-    ao.send({
-      Target = ao.id,
-      Action = "Debug",
-      Data = {
-        handler = "GetMessages",
-        msg = msg,
-        msg_from = msg.From,
-        msg_data = msg.Data,
-        msg_tags = msg.Tags
-      }
-    })
-
     local address = msg.From
-    local data = msg.Data
+    local data = Handlers.utils.parseData(msg.Data)
     local otherAddress = data.otherAddress
+    local requestId = msg.Tags.Reference
 
     -- 验证地址
     if not Handlers.utils.validateAddress(address) or not Handlers.utils.validateAddress(otherAddress) then
-      return Handlers.utils.createResponse(false, nil, "Invalid address format")
+      ao.send({
+        Target = address,
+        Action = "GetMessagesResult",
+        Tags = {
+          ["Request-ID"] = requestId,
+          ["Response-Type"] = "DirectResult"
+        },
+        Data = {
+          success = false,
+          error = "Invalid address format"
+        }
+      })
+      return
     end
 
     -- 检查是否为联系人
     if not Handlers.utils.areContacts(address, otherAddress) then
-      return Handlers.utils.createResponse(false, nil, "Not contacts")
+      ao.send({
+        Target = address,
+        Action = "GetMessagesResult",
+        Tags = {
+          ["Request-ID"] = requestId,
+          ["Response-Type"] = "DirectResult"
+        },
+        Data = {
+          success = false,
+          error = "Not contacts"
+        }
+      })
+      return
     end
 
     -- 获取会话ID
@@ -348,9 +370,20 @@ Handlers.add(
     -- 获取消息历史
     local messages = State.messages[sessionId] or {}
 
-    return Handlers.utils.createResponse(true, {
-      sessionId = sessionId,
-      messages = messages
+    -- 发送直接响应
+    ao.send({
+      Target = address,
+      Action = "GetMessagesResult",
+      Tags = {
+        ["Request-ID"] = requestId,
+        ["Response-Type"] = "DirectResult"
+      },
+      Data = {
+        success = true,
+        data = {
+          messages = messages
+        }
+      }
     })
   end
 )

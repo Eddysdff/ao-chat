@@ -68,3 +68,15 @@ export const generateSessionId = (addr1: string, addr2: string): string => {
   const sortedAddrs = [addr1, addr2].sort();
   return `${sortedAddrs[0]}_${sortedAddrs[1]}`;
 };
+
+export interface ChatMessage {
+  sender: string;
+  content: string;
+  timestamp: number;
+  encrypted?: boolean;
+}
+
+export interface ContactInvitation {
+  from: string;
+  timestamp: number;
+}

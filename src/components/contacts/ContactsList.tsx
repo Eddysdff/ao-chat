@@ -54,53 +54,70 @@ function AddContactModal({ isOpen, onClose, onSubmit, isSubmitting }: AddContact
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
-      <div className="bg-white rounded-lg p-6 w-96">
-        <h2 className="text-xl font-bold mb-4">Add New Contact</h2>
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">
+      <div className="bg-white rounded-xl p-6 w-96 shadow-xl animate-fade-in">
+        <h2 className="text-xl font-bold mb-4 flex items-center">
+          <svg className="w-5 h-5 mr-2 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
+          </svg>
+          Add New Contact
+        </h2>
         {error && (
-          <div className="mb-4 p-2 bg-red-100 text-red-600 rounded">
+          <div className="mb-4 p-3 bg-red-50 text-red-600 rounded-lg text-sm flex items-center">
+            <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
             {error}
           </div>
         )}
-        <form onSubmit={handleSubmit}>
-          <div className="mb-4">
-            <label className="block text-sm font-medium text-gray-700 mb-2">
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
               AR Address
             </label>
             <input
               type="text"
               value={address}
               onChange={(e) => setAddress(e.target.value)}
-              className="w-full p-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-green-500"
+              className="w-full p-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-colors"
+              placeholder="Enter Arweave address"
               required
             />
           </div>
-          <div className="mb-4">
-            <label className="block text-sm font-medium text-gray-700 mb-2">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
               Nickname
             </label>
             <input
               type="text"
               value={nickname}
               onChange={(e) => setNickname(e.target.value)}
-              className="w-full p-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-green-500"
+              className="w-full p-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-colors"
+              placeholder="Enter nickname"
               required
             />
           </div>
-          <div className="flex justify-end gap-2">
+          <div className="flex justify-end gap-3 pt-2">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 rounded"
+              className="px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={isSubmitting}
-              className="px-4 py-2 text-sm font-medium text-white bg-green-500 hover:bg-green-600 rounded disabled:opacity-50"
+              className="px-4 py-2 text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {isSubmitting ? 'Adding...' : 'Add Contact'}
+              {isSubmitting ? (
+                <div className="flex items-center">
+                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2" />
+                  Adding...
+                </div>
+              ) : (
+                'Add Contact'
+              )}
             </button>
           </div>
         </form>
@@ -126,52 +143,40 @@ export default function ContactsList({
 
   const loadData = async (retryCount = 0) => {
     try {
-      if (retryCount === 0) {
+      if (retryCount === 0 && contacts.length === 0) {
         setIsLoading(true);
       }
-      console.log('[Contacts] Loading data...');
       
-      // 获取邀请
-      const invitationsResult = await AOProcess.getPendingInvitations();
-      console.log('[Contacts] Raw invitations result:', invitationsResult);
+      const [invitationsResult, contactsResult] = await Promise.all([
+        AOProcess.getPendingInvitations(),
+        AOProcess.getContacts()
+      ]);
 
       if (invitationsResult.success && invitationsResult.data?.invitations) {
-        setInvitations(invitationsResult.data.invitations);
-        console.log('[Contacts] Invitations loaded:', invitationsResult.data.invitations);
-      } else {
-        console.log('[Contacts] No invitations found');
-        setInvitations([]);
+        const newInvitations = invitationsResult.data.invitations;
+        setInvitations(prev => 
+          JSON.stringify(prev) !== JSON.stringify(newInvitations) ? newInvitations : prev
+        );
       }
-
-      // 获取联系人
-      const contactsResult = await AOProcess.getContacts();
-      console.log('[Contacts] Raw contacts result:', contactsResult);
 
       if (contactsResult.success && Array.isArray(contactsResult.data?.contacts)) {
         const formattedContacts = contactsResult.data.contacts.map(contact => ({
           address: contact.address,
           nickname: contact.nickname || `User-${contact.address.slice(0, 6)}`,
-          status: 'offline' // 默认离线状态
+          status: 'offline'
         }));
-        console.log('[Contacts] Formatted contacts:', formattedContacts);
-        setContacts(formattedContacts);
-      } else {
-        console.log('[Contacts] No contacts found or invalid format');
-        setContacts([]);
+        
+        setContacts(prev => 
+          JSON.stringify(prev) !== JSON.stringify(formattedContacts) ? formattedContacts : prev
+        );
       }
-
-      setError(null);
     } catch (error) {
       console.error('[Contacts] Load data failed:', error);
-      if (error instanceof Error && error.message.includes('network') && retryCount < 3) {
-        setTimeout(() => loadData(retryCount + 1), 1000 * Math.pow(2, retryCount));
-        return;
+      if (contacts.length === 0) {
+        setError(error instanceof Error ? error.message : 'Failed to load contacts');
       }
-      setError('Failed to load contacts and invitations');
     } finally {
-      if (retryCount === 0) {
-        setIsLoading(false);
-      }
+      setIsLoading(false);
     }
   };
 
@@ -281,56 +286,75 @@ export default function ContactsList({
     setSelectedContact(contact);
   };
 
-  const handleStartChat = async (contact: Contact) => {
-    try {
-      onStartChat(contact);
-    } catch (error) {
-      console.error('[Contacts] Start chat failed:', error);
-      setNotification({
-        type: 'error',
-        message: error instanceof Error ? error.message : 'Failed to start chat'
-      });
-    }
+  const handleStartChat = (contact: Contact) => {
+    onStartChat(contact);
+    setSelectedContact(null); // 清除选中状态
   };
 
   return (
-    <div className="w-80 border-r border-gray-200 h-full flex flex-col">
-      {/* Add Contact Button */}
+    <div className="w-80 border-r border-gray-200 h-full flex flex-col bg-white">
+      {/* Header */}
       <div className="p-4 border-b border-gray-200">
         <button
           onClick={() => setIsAddModalOpen(true)}
-          className="w-full bg-green-500 hover:bg-green-600 text-white font-semibold py-2 px-4 rounded flex items-center justify-center transition-colors duration-200"
+          className="w-full bg-primary-600 hover:bg-primary-700 text-white font-medium py-2.5 px-4 rounded-lg flex items-center justify-center space-x-2 transition-all duration-200 transform hover:shadow-md active:scale-[0.98]"
         >
-          <span className="mr-2">+</span> Add Contact
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+          </svg>
+          <span>Add Contact</span>
         </button>
+
+        {/* Search Bar */}
+        <div className="mt-3 relative">
+          <input
+            type="text"
+            placeholder="Search contacts..."
+            className="w-full pl-10 pr-4 py-2 bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+          />
+          <svg className="w-5 h-5 text-gray-400 absolute left-3 top-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
+        </div>
       </div>
 
-      {/* Error Message */}
-      {error && (
-        <div className="p-4 bg-red-100 text-red-600">
-          {error}
-        </div>
-      )}
-
-      {/* Pending Invitations */}
+      {/* 在 Contacts List div 之前添加 Invitations Section */}
       {invitations.length > 0 && (
-        <div className="p-4 border-b border-gray-200">
-          <h3 className="font-semibold mb-2">Pending Invitations</h3>
-          {invitations.map((invitation) => (
-            <div
-              key={`${invitation.from}-${invitation.timestamp}`}
-              className="mb-2 p-2 bg-gray-50 rounded transform transition-all duration-300 hover:scale-102 hover:shadow-md"
-            >
-              <div className="text-sm font-medium">{invitation.fromNickname}</div>
-              <div className="text-xs text-gray-500 mb-2">{invitation.from}</div>
-              <button
-                onClick={() => handleAcceptInvitation(invitation)}
-                className="w-full text-xs bg-green-500 hover:bg-green-600 text-white px-2 py-1 rounded transition-colors duration-200"
-              >
-                Accept
-              </button>
-            </div>
-          ))}
+        <div className="border-b border-gray-200">
+          <div className="p-4 bg-blue-50">
+            <h3 className="text-sm font-medium text-gray-900 mb-2">Pending Invitations</h3>
+            {invitations.map((invitation) => (
+              <div key={invitation.from} className="bg-white p-3 rounded-lg shadow-sm mb-2 last:mb-0">
+                <div className="flex items-center justify-between">
+                  <div className="flex-1">
+                    <p className="text-sm text-gray-900 font-medium">
+                      New Contact Request
+                    </p>
+                    <p className="text-xs text-gray-500 font-mono">
+                      From: {invitation.from.slice(0, 8)}...{invitation.from.slice(-6)}
+                    </p>
+                  </div>
+                  <div className="flex space-x-2">
+                    <button
+                      onClick={() => handleAcceptInvitation(invitation)}
+                      className="px-3 py-1 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-colors"
+                    >
+                      Accept
+                    </button>
+                    <button
+                      onClick={async () => {
+                        // TODO: 实现拒绝邀请的功能
+                        console.log('Reject invitation:', invitation);
+                      }}
+                      className="px-3 py-1 text-xs font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md transition-colors"
+                    >
+                      Reject
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
@@ -338,32 +362,34 @@ export default function ContactsList({
       <div className="flex-1 overflow-y-auto">
         {isLoading ? (
           <div className="flex items-center justify-center h-32">
-            <div className="text-gray-500">Loading contacts...</div>
+            <div className="w-8 h-8 border-4 border-primary-200 border-t-primary-600 rounded-full animate-spin" />
           </div>
         ) : contacts.length === 0 ? (
-          <div className="text-center text-gray-500 mt-8">
-            No contacts yet
+          <div className="flex flex-col items-center justify-center h-32 text-gray-500">
+            <svg className="w-12 h-12 mb-2 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+            </svg>
+            <p>No contacts yet</p>
           </div>
         ) : (
           contacts.map((contact) => (
             <div
               key={contact.address}
-              className={`
-                p-4 border-b border-gray-200
-                hover:bg-gray-50 transition-colors duration-200
-                ${selectedContact?.address === contact.address ? 'bg-gray-50' : ''}
-                cursor-pointer
-              `}
+              className={`p-4 hover:bg-gray-50 cursor-pointer transition-all duration-200 border-b border-gray-100
+                ${selectedContact?.address === contact.address ? 'bg-gray-50' : ''}`}
               onClick={() => handleContactClick(contact)}
             >
-              <div className="flex justify-between items-center">
-                <div>
-                  <div className="font-semibold">{contact.nickname}</div>
-                  <div className="text-sm text-gray-500">{contact.address}</div>
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 rounded-full bg-primary-100 text-primary-600 flex items-center justify-center font-semibold">
+                  {contact.nickname.charAt(0).toUpperCase()}
                 </div>
-                <div className={`w-2 h-2 rounded-full ${
-                  contact.status === 'online' ? 'bg-green-500' : 'bg-gray-300'
-                }`} />
+                <div className="flex-1 min-w-0">
+                  <div className="font-medium text-gray-900 truncate">{contact.nickname}</div>
+                  <div className="text-sm text-gray-500 truncate font-mono">
+                    {contact.address.slice(0, 8)}...{contact.address.slice(-6)}
+                  </div>
+                </div>
+                <div className={`w-2 h-2 rounded-full ${contact.status === 'online' ? 'bg-green-400' : 'bg-gray-300'}`} />
               </div>
               {selectedContact?.address === contact.address && (
                 <button
@@ -371,10 +397,9 @@ export default function ContactsList({
                     e.stopPropagation();
                     handleStartChat(contact);
                   }}
-                  disabled={isCreatingChat}
-                  className="mt-2 w-full bg-green-500 hover:bg-green-600 text-white text-sm font-semibold py-1 px-2 rounded transition-colors duration-200 disabled:opacity-50"
+                  className="mt-3 w-full bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium py-2 px-4 rounded-lg transition-all duration-200 transform hover:scale-[1.02] active:scale-[0.98]"
                 >
-                  {isCreatingChat ? 'Creating Chat...' : 'Start Chat'}
+                  Start Chat
                 </button>
               )}
             </div>
@@ -382,7 +407,6 @@ export default function ContactsList({
         )}
       </div>
 
-      {/* Add Contact Modal */}
       <AddContactModal
         isOpen={isAddModalOpen}
         onClose={() => setIsAddModalOpen(false)}
@@ -390,7 +414,6 @@ export default function ContactsList({
         isSubmitting={false}
       />
 
-      {/* Notification */}
       {notification && (
         <Notification
           type={notification.type}
