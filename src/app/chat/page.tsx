@@ -7,7 +7,6 @@ import { AOProcess } from '@/lib/ao-process';
 import Navbar from '@/components/Navbar';
 import ContactsList from '@/components/contacts/ContactsList';
 import ChatWindow from '@/components/chat/ChatWindow';
-import { ChatRoom } from '@/types/ao';
 
 export default function ChatPage() {
   const router = useRouter();
