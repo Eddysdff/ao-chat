@@ -21,9 +21,6 @@ export const config = {
       production: 'https://arweave.net'
     }
   },
-  proxy: {
-    url: 'http://127.0.0.1:7890'  // 您的代理地址，请确认这是正确的
-  }
 };
 
 // 获取当前环境
