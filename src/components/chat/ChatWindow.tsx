@@ -61,6 +61,21 @@ export default function ChatWindow({
     }
   };
 
+  const searchMessages = async (searchTerm: string): Promise<ChatMessage[]> => {
+    if (!searchTerm.trim()) {
+      return messages;
+    }
+
+    try {
+      return messages.filter(message => 
+        message.content.toLowerCase().includes(searchTerm.toLowerCase())
+      );
+    } catch (error) {
+      console.error('Search messages failed:', error);
+      return [];
+    }
+  };
+
   const handleSearch = async (searchTerm: string) => {
     setIsSearching(true);
     try {
@@ -73,6 +88,8 @@ export default function ChatWindow({
       
       const newMessages = [...new Set([...localFiltered, ...response])];
       setFilteredMessages(newMessages);
+    } catch (error) {
+      console.error('Search failed:', error);
     } finally {
       setIsSearching(false);
     }
