@@ -70,10 +70,11 @@ export const generateSessionId = (addr1: string, addr2: string): string => {
 };
 
 export interface ChatMessage {
+  id?: string;
   sender: string;
   content: string;
   timestamp: number;
-  encrypted?: boolean;
+  status?: 'sent' | 'delivered' | 'read';
 }
 
 export interface ContactInvitation {
