@@ -3,21 +3,15 @@ if not Handlers.utils then
   Handlers.utils = {}
 end
 
--- 初始化状态
 if not State then
   State = {
-    invitations = {},  -- 存储所有邀请
-    contacts = {},     -- 存储所有用户的联系人列表
-    nicknames = {},     -- 存储用户昵称的修改历史
-    chatrooms = {},       -- 用户的聊天室列表
-    chatInvitations = {},  -- 聊天室邀请
-    publicKeys = {}  -- 存储参与者的公钥
+    chatInvitations = {},  -- 存储聊天室邀请
+    chatrooms = {}         -- 存储聊天室信息
   }
 end
 
 -- 常量
 local INVITATION_EXPIRE_DAYS = 7  -- 邀请7天后过期
-local MAX_NICKNAME_LENGTH = 32    -- 昵称最大长度
 
 -- 工具函数
 function isExpired(timestamp)
@@ -25,408 +19,236 @@ function isExpired(timestamp)
   return (now - timestamp) > (INVITATION_EXPIRE_DAYS * 24 * 60 * 60)
 end
 
-function validateNickname(nickname)
-  return nickname and string.len(nickname) <= MAX_NICKNAME_LENGTH
-end
+-- 改进 JSON 处理函数
+local function encode(data)
+  if ao and ao.json then
+    -- 使用 ao.json，添加错误处理
+    local success, result = pcall(function()
+      return ao.json.encode(data)
+    end)
+    
+    if success then
+      -- 添加调试日志
+      print("Successfully encoded data:", result)
+      return result
+    end
+    -- 如果 ao.json.encode 失败，使用备选方案
+    print("ao.json.encode failed, using fallback")
+  end
 
-function cleanExpiredInvitations(address)
-  if not State.invitations[address] then return end
-  
-  local valid = {}
-  for _, inv in ipairs(State.invitations[address]) do
-    if not isExpired(inv.timestamp) and inv.status == "pending" then
-      table.insert(valid, inv)
+  -- 改进的备选序列化方法
+  local function serialize(val)
+    local t = type(val)
+    if t == "table" then
+      local res = "{"
+      local first = true
+      for k, v in pairs(val) do
+        if not first then
+          res = res .. ","
+        end
+        first = false
+        if type(k) == "string" then
+          res = res .. '"' .. k .. '":'
+        end
+        res = res .. serialize(v)
+      end
+      return res .. "}"
+    elseif t == "string" then
+      return '"' .. string.gsub(val, '"', '\\"') .. '"'
+    elseif t == "number" or t == "boolean" then
+      return tostring(val)
+    elseif t == "nil" then
+      return "null"
+    else
+      return '"' .. tostring(val) .. '"'
     end
   end
-  State.invitations[address] = valid
+
+  -- 使用备选序列化方法
+  local success, result = pcall(serialize, data)
+  if success then
+    print("Successfully encoded data using fallback:", result)
+    return result
+  end
+  
+  -- 如果所有方法都失败，返回基本的错误响应
+  print("All encoding methods failed")
+  return '{"success":false,"error":"Failed to encode response"}'
 end
 
--- 处理发送邀请
+-- 发送聊天室邀请
 Handlers.add(
-  "send-invitation",
-  Handlers.utils.hasMatchingTag("Action", "SendInvitation"),
+  "SendChatroomInvitation",
+  Handlers.utils.hasMatchingTag("Action", "SendChatroomInvitation"),
   function(msg)
     local from = msg.From
     local to = msg.Data.to
-    local fromNickname = msg.Data.nickname
+    local processId = msg.Data.processId
 
-    -- 验证昵称
-    if not validateNickname(fromNickname) then
-      return { success = false, error = "Invalid nickname length" }
+    -- 添加调试日志
+    print("Processing chatroom invitation:")
+    print("From:", from)
+    print("To:", to)
+    print("ProcessId:", processId)
+
+    -- 验证参数
+    if not processId then
+      return encode({
+        success = false,
+        error = "Process ID is required"
+      })
     end
 
-    -- 清理接收者的过期邀请
-    cleanExpiredInvitations(to)
+    -- 初始化接收者的邀请列表
+    if not State.chatInvitations[to] then
+      State.chatInvitations[to] = {}
+    end
 
-    -- 检查是否已经是联系人
-    if State.contacts[from] then
-      for _, contact in ipairs(State.contacts[from]) do
-        if contact.address == to then
-          return { success = false, error = "Already in contacts" }
-        end
+    -- 检查是否已经存在相同的邀请
+    for _, inv in ipairs(State.chatInvitations[to]) do
+      if inv.processId == processId and inv.status == "pending" then
+        return encode({
+          success = false,
+          error = "Invitation already exists"
+        })
       end
     end
 
     -- 创建新邀请
     local invitation = {
+      processId = processId,
       from = from,
       to = to,
-      fromNickname = fromNickname,
-      status = "pending",
-      timestamp = os.time()
+      timestamp = os.time(),
+      status = "pending"
     }
 
-    if not State.invitations[to] then
-      State.invitations[to] = {}
-    end
-    table.insert(State.invitations[to], invitation)
+    -- 添加到邀请列表
+    table.insert(State.chatInvitations[to], invitation)
 
-    return { success = true, invitation = invitation }
-  end
-)
+    -- 添加调试日志
+    print("Invitation created:", encode(invitation))
 
--- 处理接受邀请
-Handlers.add(
-  "accept-invitation",
-  Handlers.utils.hasMatchingTag("Action", "AcceptInvitation"),
-  function(msg)
-    local to = msg.From
-    local from = msg.Data.from
-    local toNickname = msg.Data.nickname
-
-    if not validateNickname(toNickname) then
-      return { success = false, error = "Invalid nickname length" }
-    end
-
-    cleanExpiredInvitations(to)
-
-    for _, inv in ipairs(State.invitations[to]) do
-      if inv.from == from and inv.status == "pending" then
-        inv.status = "accepted"
-        
-        -- 添加双向联系人关系
-        if not State.contacts[to] then
-          State.contacts[to] = {}
-        end
-        if not State.contacts[from] then
-          State.contacts[from] = {}
-        end
-
-        table.insert(State.contacts[to], {
-          address = from,
-          nickname = inv.fromNickname
-        })
-        table.insert(State.contacts[from], {
-          address = to,
-          nickname = toNickname
-        })
-
-        return { success = true }
-      end
-    end
-
-    return { success = false, error = "Invitation not found or expired" }
-  end
-)
-
--- 处理拒绝邀请
-Handlers.add(
-  "reject-invitation",
-  Handlers.utils.hasMatchingTag("Action", "RejectInvitation"),
-  function(msg)
-    local to = msg.From
-    local from = msg.Data.from
-
-    cleanExpiredInvitations(to)
-
-    for _, inv in ipairs(State.invitations[to]) do
-      if inv.from == from and inv.status == "pending" then
-        inv.status = "rejected"
-        return { success = true }
-      end
-    end
-
-    return { success = false, error = "Invitation not found or expired" }
-  end
-)
-
--- 删除联系人
-Handlers.add(
-  "remove-contact",
-  Handlers.utils.hasMatchingTag("Action", "RemoveContact"),
-  function(msg)
-    local from = msg.From
-    local target = msg.Data.address
-
-    -- 从双方的联系人列表中删除
-    local function removeFromList(owner, target)
-      if State.contacts[owner] then
-        local newList = {}
-        for _, contact in ipairs(State.contacts[owner]) do
-          if contact.address ~= target then
-            table.insert(newList, contact)
-          end
-        end
-        State.contacts[owner] = newList
-      end
-    end
-
-    removeFromList(from, target)
-    removeFromList(target, from)
-
-    return { success = true }
-  end
-)
-
--- 修改联系人昵称
-Handlers.add(
-  "update-nickname",
-  Handlers.utils.hasMatchingTag("Action", "UpdateNickname"),
-  function(msg)
-    local from = msg.From
-    local target = msg.Data.address
-    local newNickname = msg.Data.nickname
-
-    if not validateNickname(newNickname) then
-      return { success = false, error = "Invalid nickname length" }
-    end
-
-    -- 更新昵称
-    if State.contacts[from] then
-      for _, contact in ipairs(State.contacts[from]) do
-        if contact.address == target then
-          contact.nickname = newNickname
-          
-          -- 记录昵称修改历史
-          if not State.nicknames[from] then
-            State.nicknames[from] = {}
-          end
-          table.insert(State.nicknames[from], {
-            target = target,
-            nickname = newNickname,
-            timestamp = os.time()
-          })
-          
-          return { success = true }
-        end
-      end
-    end
-
-    return { success = false, error = "Contact not found" }
-  end
-)
-
--- 查询待处理的邀请
-Handlers.add(
-  "get-pending-invitations",
-  Handlers.utils.hasMatchingTag("Action", "GetPendingInvitations"),
-  function(msg)
-    local address = msg.From
-    cleanExpiredInvitations(address)
-    return { success = true, invitations = State.invitations[address] or {} }
-  end
-)
-
--- 查询联系人列表
-Handlers.add(
-  "get-contacts",
-  Handlers.utils.hasMatchingTag("Action", "GetContacts"),
-  function(msg)
-    local address = msg.From
-    return { success = true, contacts = State.contacts[address] or {} }
-  end
-)
-
--- 创建聊天室
-Handlers.add(
-  "create-chatroom",
-  Handlers.utils.hasMatchingTag("Action", "CreateChatroom"),
-  function(msg)
-    local creator = msg.From
-    local participant = msg.Data.participant
-
-    -- 验证是否是联系人
-    local isContact = false
-    if State.contacts[creator] then
-      for _, contact in ipairs(State.contacts[creator]) do
-        if contact.address == participant then
-          isContact = true
-          break
-        end
-      end
-    end
-
-    if not isContact then
-      return { success = false, error = "Not in contacts" }
-    end
-
-    -- 读取聊天室模板
-    local templateSrc = ao.env.CHATROOM_TEMPLATE
-    if not templateSrc then
-      return { success = false, error = "Chatroom template not found" }
-    end
-
-    -- 注入参与者信息到模板
-    local processCode = string.format(
-      templateSrc,
-      creator,    -- 替换模板中的创建者
-      participant -- 替换模板中的参与者
-    )
-
-    -- 添加重试机制
-    local maxRetries = 3
-    local processId = nil
-    
-    for i = 1, maxRetries do
-        local result = ao.spawn(processCode)
-        if result.processId then
-            processId = result.processId
-            break
-        end
-        -- 等待短暂时间后重试
-        ao.wait(1000)
-    end
-    
-    if not processId then
-        return { success = false, error = "Failed to create chatroom" }
-    end
-    
-    -- 验证Process是否正常运行
-    local checkResult = ao.send(processId, {
-        action = "health-check"
+    return encode({
+      success = true,
+      invitation = invitation
     })
+  end
+)
+
+-- 获取聊天室邀请
+Handlers.add(
+  "GetChatroomInvitations",
+  Handlers.utils.hasMatchingTag("Action", "GetChatroomInvitations"),
+  function(msg)
+    local address = msg.From
     
-    if not checkResult.ok then
-        return { success = false, error = "Chatroom validation failed" }
+    -- 添加调试日志
+    print("Getting chatroom invitations for:", address)
+    
+    -- 获取该地址的所有待处理邀请
+    local invitations = State.chatInvitations[address] or {}
+    
+    -- 过滤出未过期的待处理邀请
+    local pendingInvitations = {}
+    for _, inv in ipairs(invitations) do
+      if inv.status == "pending" and not isExpired(inv.timestamp) then
+        table.insert(pendingInvitations, inv)
+      end
     end
 
-    -- 记录聊天室信息
-    local chatroomInfo = {
-      processId = processId,
-      creator = creator,
-      participant = participant,
-      createdAt = os.time()
-    }
-
-    -- 添加到创建者的聊天室列表
-    if not State.chatrooms[creator] then
-      State.chatrooms[creator] = {}
-    end
-    table.insert(State.chatrooms[creator], chatroomInfo)
-
-    -- 添加到参与者的邀请列表
-    if not State.chatInvitations[participant] then
-      State.chatInvitations[participant] = {}
-    end
-    table.insert(State.chatInvitations[participant], chatroomInfo)
-
-    return { 
-      success = true, 
-      processId = processId,
-      chatroom = chatroomInfo
-    }
+    return encode({
+      success = true,
+      invitations = pendingInvitations
+    })
   end
 )
 
 -- 接受聊天室邀请
 Handlers.add(
-  "accept-chatroom",
-  Handlers.utils.hasMatchingTag("Action", "AcceptChatroom"),
+  "AcceptChatroomInvitation",
+  Handlers.utils.hasMatchingTag("Action", "AcceptChatroomInvitation"),
   function(msg)
-    local participant = msg.From
+    local address = msg.From
     local processId = msg.Data.processId
+    
+    -- 查找并更新邀请状态
+    if State.chatInvitations[address] then
+      for _, inv in ipairs(State.chatInvitations[address]) do
+        if inv.processId == processId and inv.status == "pending" then
+          if isExpired(inv.timestamp) then
+            return encode({
+              success = false,
+              error = "Invitation has expired"
+            })
+          end
 
-    -- 查找邀请
-    local invitation = nil
-    if State.chatInvitations[participant] then
-      for i, inv in ipairs(State.chatInvitations[participant]) do
-        if inv.processId == processId then
-          invitation = table.remove(State.chatInvitations[participant], i)
-          break
+          inv.status = "accepted"
+          
+          -- 记录聊天室信息
+          if not State.chatrooms[address] then
+            State.chatrooms[address] = {}
+          end
+          table.insert(State.chatrooms[address], {
+            processId = processId,
+            joinedAt = os.time()
+          })
+          
+          return encode({ success = true })
         end
       end
     end
-
-    if not invitation then
-      return { success = false, error = "Invitation not found" }
-    end
-
-    -- 添加到参与者的聊天室列表
-    if not State.chatrooms[participant] then
-      State.chatrooms[participant] = {}
-    end
-    table.insert(State.chatrooms[participant], invitation)
-
-    return { success = true, chatroom = invitation }
+    
+    return encode({ 
+      success = false, 
+      error = "Invitation not found" 
+    })
   end
 )
 
--- 获取用户的聊天室列表
+-- 获取聊天室列表
 Handlers.add(
-  "get-chatrooms",
+  "GetChatrooms",
   Handlers.utils.hasMatchingTag("Action", "GetChatrooms"),
   function(msg)
     local address = msg.From
-    return { 
-      success = true, 
+    
+    return encode({
+      success = true,
       chatrooms = State.chatrooms[address] or {},
       invitations = State.chatInvitations[address] or {}
-    }
+    })
   end
 )
 
--- 添加存储公钥的处理器
+-- 添加调试处理器
 Handlers.add(
-  "store-public-key",
-  Handlers.utils.hasMatchingTag("Action", "StorePublicKey"),
+  "DebugState",
+  Handlers.utils.hasMatchingTag("Action", "DebugState"),
   function(msg)
-    if not isParticipant(msg.From) then
-      return { success = false, error = "Not a participant" }
-    end
-
-    State.publicKeys[msg.From] = msg.Data.publicKey
-    return { success = true }
+    return ao.json.encode({
+      success = true,
+      state = {
+        initialized = true,
+        contacts = State.contacts,
+        invitations = State.invitations
+      }
+    })
   end
 )
 
--- 获取公钥的处理器
+-- 确保所有处理器都返回正确格式的JSON
 Handlers.add(
-  "get-public-key",
-  Handlers.utils.hasMatchingTag("Action", "GetPublicKey"),
+  "GetContacts",
+  Handlers.utils.hasMatchingTag("Action", "GetContacts"),
   function(msg)
-    if not isParticipant(msg.From) then
-      return { success = false, error = "Not a participant" }
-    end
+    local address = msg.From
+    local contacts = State.contacts[address] or {}
 
-    local targetAddress = msg.Data.address
-    if not State.publicKeys[targetAddress] then
-      return { success = false, error = "Public key not found" }
-    end
-
-    return { 
-      success = true, 
-      publicKey = State.publicKeys[targetAddress] 
-    }
-  end
-)
-
--- 修改发送消息的处理器以支持加密消息
-Handlers.add(
-  "send",
-  Handlers.utils.hasMatchingTag("Action", "Send"),
-  function(msg)
-    if not isParticipant(msg.From) then
-      return { success = false, error = "Not a participant" }
-    end
-
-    local message = {
-      sender = msg.From,
-      encrypted = msg.Data.encrypted,
-      iv = msg.Data.iv,
-      timestamp = os.time()
-    }
-    
-    table.insert(State.messages, message)
-    return { success = true, message = message }
+    -- 确保返回正确的JSON格式
+    return ao.json.encode({
+      success = true,
+      contacts = contacts
+    })
   end
 ) 

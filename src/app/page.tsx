@@ -3,7 +3,6 @@
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { connectWallet, getActiveAddress } from '@/lib/arconnect';
-import { AOProcess } from '@/lib/ao-process';
 
 export default function Home() {
   const router = useRouter();
@@ -13,46 +12,29 @@ export default function Home() {
   const MAX_RETRIES = 3;
 
   useEffect(() => {
-    checkConnection();
-  }, []);
-
-  const checkConnection = async () => {
-    try {
+    const checkExistingConnection = async () => {
       const address = await getActiveAddress();
       if (address) {
-        const isHealthy = await AOProcess.checkHealth();
-        if (!isHealthy) {
-          throw new Error('AO Process connection failed');
-        }
         router.push('/chat');
       }
-    } catch (error) {
-      console.error('Connection check failed:', error);
-    }
-  };
+    };
+    checkExistingConnection();
+  }, [router]);
 
   const handleConnect = async () => {
+    if (isConnecting) return;
+
     try {
       setIsConnecting(true);
       setError(null);
-      await connectWallet();
       
-      const isHealthy = await AOProcess.checkHealth();
-      if (!isHealthy) {
-        throw new Error('Unable to connect to AO Process');
+      const address = await connectWallet();
+      if (address) {
+        router.push('/chat');
       }
-
-      router.push('/chat');
     } catch (error) {
       console.error('Connection failed:', error);
       setError(getErrorMessage(error));
-      
-      if (connectionAttempts < MAX_RETRIES) {
-        setConnectionAttempts(prev => prev + 1);
-        setTimeout(() => {
-          handleConnect();
-        }, 1000 * Math.pow(2, connectionAttempts));
-      }
     } finally {
       setIsConnecting(false);
     }
@@ -78,121 +60,88 @@ export default function Home() {
   };
 
   return (
-    <main className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-b from-white to-gray-100">
-      {/* Logo and Title Section */}
-      <div className="text-center mb-12 animate-fade-in">
-        <h1 className="text-6xl font-bold text-black mb-4">AO-CHAT</h1>
-        <p className="text-gray-600 text-lg">
-          Decentralized chat powered by Arweave & AO
-        </p>
-      </div>
-
-      {/* Connection Section */}
-      <div className="w-full max-w-md px-6">
-        {/* Connect Button */}
-        <button
-          onClick={handleConnect}
-          disabled={isConnecting}
-          className="w-full bg-gradient-to-r from-green-500 to-green-600 
-                   hover:from-green-600 hover:to-green-700 
-                   text-white font-semibold py-3 px-6 rounded-lg
-                   shadow-lg hover:shadow-xl transition-all duration-300
-                   disabled:opacity-50 disabled:cursor-not-allowed
-                   flex items-center justify-center space-x-2"
-        >
-          {isConnecting ? (
-            <>
-              <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-              </svg>
-              <span>Connecting{'.'.repeat((connectionAttempts % 3) + 1)}</span>
-            </>
-          ) : (
-            <>
-              <svg 
-                className="w-8 h-8 mx-auto text-green-500 mb-3" 
-                fill="none" 
-                stroke="currentColor" 
-                viewBox="0 0 24 24"
-                width="24"
-                height="24"
-              >
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
-              </svg>
-              <span>Connect Wallet</span>
-            </>
-          )}
-        </button>
-
-        {/* Error Message */}
-        {error && (
-          <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg">
-            <div className="flex items-center text-red-700">
-              <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              <span>{error}</span>
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-primary-50 to-white">
+      <div className="w-full max-w-4xl mx-auto px-4 py-8">
+        {/* Logo & Title */}
+        <div className="text-center mb-8">
+          <div className="inline-block mb-4">
+            <div className="w-10 h-10 relative">
+              <div className="absolute inset-0 bg-gradient-to-r from-primary-500 to-primary-600 rounded-lg transform rotate-45" />
+              <div className="absolute inset-0 flex items-center justify-center">
+                <svg className="w-5 h-5 text-white transform -rotate-45" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                </svg>
+              </div>
             </div>
-            <button
-              onClick={handleRetry}
-              className="mt-2 text-sm text-green-600 hover:text-green-700 font-medium"
-            >
-              Try Again
-            </button>
           </div>
-        )}
+          
+          <h1 className="text-2xl font-bold text-primary-600 mb-2">AO-CHAT</h1>
+          <p className="text-gray-600 text-sm">Secure, Decentralized Instant Messaging</p>
+        </div>
 
-        {/* Connection Status */}
-        {connectionAttempts > 0 && (
-          <div className="mt-4 text-center text-sm text-gray-500">
-            Retry attempt: {connectionAttempts} of {MAX_RETRIES}
-          </div>
-        )}
+        {/* Connect Button */}
+        <div className="w-64 mx-auto mb-12">
+          <button
+            onClick={handleConnect}
+            disabled={isConnecting}
+            className="w-full bg-primary-600 text-white text-sm rounded-lg px-4 py-2 flex items-center justify-center space-x-2 hover:bg-primary-700 transition-colors disabled:opacity-50"
+          >
+            {isConnecting ? (
+              <>
+                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                <span>Connecting...</span>
+              </>
+            ) : (
+              <>
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                </svg>
+                <span>Connect Wallet</span>
+              </>
+            )}
+          </button>
 
-        {/* ArConnect Installation Prompt */}
-        {error?.includes('ArConnect') && (
-          <div className="mt-6 text-center">
-            <a
-              href="https://www.arconnect.io"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center text-green-600 hover:text-green-700 
-                       font-medium transition-colors duration-200"
-            >
-              <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-              </svg>
-              Install ArConnect
-            </a>
-          </div>
-        )}
+          {error && (
+            <div className="mt-3 text-xs bg-red-50 text-red-600 p-2 rounded-lg">
+              <p>{error}</p>
+              <button onClick={handleRetry} className="text-primary-600 hover:text-primary-700 mt-1">
+                Try Again
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Features */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 max-w-3xl mx-auto">
+          {[
+            {
+              icon: "M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z",
+              title: "Encrypted Messages",
+              description: "End-to-end encrypted communication"
+            },
+            {
+              icon: "M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4",
+              title: "Decentralized",
+              description: "Built on Arweave & AO Protocol"
+            },
+            {
+              icon: "M17 8h2a2 2 0 012 2v6a2 2 0 01-2 2h-2v4l-4-4H9a1.994 1.994 0 01-1.414-.586m0 0L11 14h4a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2v4l.586-.586z",
+              title: "Instant Messaging",
+              description: "Real-time messaging system"
+            }
+          ].map((feature, index) => (
+            <div key={index} className="bg-white/80 p-3 rounded-lg shadow-sm text-center">
+              <div className="w-6 h-6 bg-primary-100 rounded-lg flex items-center justify-center mx-auto mb-2">
+                <svg className="w-3 h-3 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={feature.icon} />
+                </svg>
+              </div>
+              <h3 className="text-sm font-semibold mb-1">{feature.title}</h3>
+              <p className="text-xs text-gray-600">{feature.description}</p>
+            </div>
+          ))}
+        </div>
       </div>
-
-      {/* Features Section */}
-      <div className="mt-16 grid grid-cols-1 md:grid-cols-3 gap-6 px-6 max-w-5xl">
-        <div className="text-center p-5 bg-white rounded-lg shadow-md hover:shadow-lg transition-shadow duration-300">
-          <svg className="w-128 h-128 mx-auto text-green-500 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" width="128" height="128" >
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-          </svg>
-          <h3 className="text-base font-semibold mb-1">Messages</h3>
-          <p className="text-gray-600 text-sm">End-to-end encrypted messaging on Arweave & AO</p>
-        </div>
-        <div className="text-center p-5 bg-white rounded-lg shadow-md hover:shadow-lg transition-shadow duration-300">
-          <svg className="w-128 h-128 mx-auto text-green-500 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" width="128" height="128" >
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-          </svg>
-          <h3 className="text-base font-semibold mb-1">Video Calls</h3>
-          <p className="text-gray-600 text-sm">P2P video calls with WebRTC</p>
-        </div>
-        <div className="text-center p-5 bg-white rounded-lg shadow-md hover:shadow-lg transition-shadow duration-300">
-          <svg className="w-128 h-128 mx-auto text-green-500 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" width="128" height="128" >
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"  />
-          </svg>
-          <h3 className="text-base font-semibold mb-1">Decentralized</h3>
-          <p className="text-gray-600 text-sm">Fully decentralized on Arweave & AO</p>
-        </div>
-      </div>
-    </main>
+    </div>
   );
 }
