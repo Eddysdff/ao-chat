@@ -3,8 +3,8 @@ if not State then
   State = {
     info = {
       created_at = os.time(),
-      creator = nil,    -- 将在spawn时设置
-      participant = nil -- 将在spawn时设置
+      creator = "%s",    -- 将被替换为创建者地址
+      participant = "%s" -- 将被替换为参与者地址
     },
     messages = {},
     participants = {}   -- 记录已加入的参与者
@@ -18,16 +18,16 @@ end
 
 -- 加入聊天室
 Handlers.add(
-  "join",
+  "Join",
   Handlers.utils.hasMatchingTag("Action", "Join"),
   function(msg)
     local address = msg.From
     -- 只允许创建者和被邀请者加入
     if address == State.info.creator or address == State.info.participant then
       State.participants[address] = true
-      return { success = true }
+      return encode({ success = true })
     end
-    return { success = false, error = "Unauthorized" }
+    return encode({ success = false, error = "Unauthorized" })
   end
 )
 

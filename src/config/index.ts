@@ -1,4 +1,33 @@
-export const config = {
+// 定义环境类型
+type Environment = 'development' | 'production';
+
+// 定义配置类型
+interface EndpointConfig {
+  MU_URL: string;
+  CU_URL: string;
+}
+
+interface ArweaveConfig {
+  endpoints: {
+    [K in Environment]: string;
+  };
+}
+
+interface AOConfig {
+  endpoints: {
+    [K in Environment]: EndpointConfig;
+  };
+  processId: {
+    [K in Environment]: string;
+  };
+}
+
+interface Config {
+  ao: AOConfig;
+  arweave: ArweaveConfig;
+}
+
+export const config: Config = {
   ao: {
     endpoints: {
       development: {
@@ -11,8 +40,8 @@ export const config = {
       }
     },
     processId: {
-      development: 'IOKr_HIFuxPdW4M_R8Dnzico126_t5b2Wdwa_5lqlS0',
-      production: 'IOKr_HIFuxPdW4M_R8Dnzico126_t5b2Wdwa_5lqlS0'
+      development: 'ovis--ukeLTI6HduncpzE4evvwebqmKvxzR6XdC9x6s',
+      production: 'ovis--ukeLTI6HduncpzE4evvwebqmKvxzR6XdC9x6s'
     }
   },
   arweave: {
@@ -20,19 +49,26 @@ export const config = {
       development: 'https://arweave.net',
       production: 'https://arweave.net'
     }
-  },
-  proxy: {
-    url: 'http://127.0.0.1:7890'  // 您的代理地址，请确认这是正确的
   }
 };
 
 // 获取当前环境
-const getEnvironment = () => {
-  return process.env.NODE_ENV || 'development';
+const getEnvironment = (): Environment => {
+  return (process.env.NODE_ENV || 'development') as Environment;
 };
 
+interface AppConfig {
+  ao: {
+    endpoints: EndpointConfig;
+    processId: string;
+  };
+  arweave: {
+    endpoint: string;
+  };
+}
+
 // 导出配置获取函数
-export const getConfig = () => {
+export const getConfig = (): AppConfig => {
   const env = getEnvironment();
   return {
     ao: {
@@ -41,7 +77,8 @@ export const getConfig = () => {
     },
     arweave: {
       endpoint: config.arweave.endpoints[env]
-    },
-    proxy: config.proxy
+    }
   };
 };
+
+export default getConfig();
