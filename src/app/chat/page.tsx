@@ -8,6 +8,7 @@ import Navbar from '@/components/Navbar';
 import ContactsList from '@/components/contacts/ContactsList';
 import ChatWindow from '@/components/chat/ChatWindow';
 import { Contact, Message } from '@/types/ao';
+import { Encryption } from '@/lib/encryption';
 
 // 修改消息类型定义
 interface RawMessage {
